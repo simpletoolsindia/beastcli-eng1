@@ -230,25 +230,6 @@ TEMPLATES: list[TaskTemplate] = [
         domain="filesystem",
         complexity=3,
     ),
-    TaskTemplate(
-        description="Create a new file with parent directories",
-        system_prompt=(
-            "You are an expert CLI assistant. Use write_file to create new files. "
-            "It automatically creates parent directories."
-        ),
-        user_request="Create a new test file at tests/test_api.py with a basic test class",
-        steps=[
-            {
-                "tool_name": "write_file",
-                "arguments": {
-                    "path": "tests/test_api.py",
-                    "content": '"""API tests."""\n\nimport unittest\n\n\nclass TestAPI(unittest.TestCase):\n    def test_health(self):\n        self.assertTrue(True)\n',
-                },
-            },
-        ],
-        domain="filesystem",
-        complexity=1,
-    ),
 
     # =====================================================================
     # Git Operations
@@ -705,6 +686,7 @@ class DatasetCreator:
         self.max_tool_calls = max_tool_calls
 
         # Filter templates by tool call count and domain
+        # Favor 2-4 tools (high quality + good diversity)
         self.templates = [
             t for t in TEMPLATES
             if min_tool_calls <= len(t.steps) <= max_tool_calls
@@ -714,10 +696,29 @@ class DatasetCreator:
             # Fallback: use all templates
             self.templates = TEMPLATES
 
+        # Weighted template selection: prefer 2-4 tool templates (quality signal)
+        self.template_weights: dict[int, float] = {
+            1: 1.0,   # Single-tool: lower weight
+            2: 3.0,   # Two-tool: good reasoning chain
+            3: 5.0,   # Three-tool: ideal complexity
+            4: 4.0,   # Four-tool: thorough reasoning
+        }
+
     def _seed_from_index(self, index: int) -> int:
         """Derive a reproducible seed from index."""
         base = self.seed * 31337 + index * 7
         return base % (2**31)
+
+    def _weighted_template_choice(self, rng: random.Random) -> TaskTemplate:
+        """Pick a template using weighted selection (favor 2-4 tool templates)."""
+        # Build weighted pool
+        pool: list[TaskTemplate] = []
+        for t in self.templates:
+            step_count = len(t.steps)
+            weight = self.template_weights.get(step_count, 1.0)
+            # Repeat template `weight` times (as integer) for selection
+            pool.extend([t] * int(weight))
+        return rng.choice(pool)
 
     def generate_one(self, index: int = 0) -> TrainingSample:
         """
@@ -734,8 +735,8 @@ class DatasetCreator:
         fs_seed = seed + 12345
         fs = SimulatedFilesystem(seed=fs_seed)
 
-        # Pick a random template
-        template = rng.choice(self.templates)
+        # Pick a random template using weighted selection
+        template = self._weighted_template_choice(rng)
 
         # Build sample
         sample = TrainingSample()
