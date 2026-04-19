@@ -1,19 +1,21 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
 ║              ULTIMATE AGENT TRAINING DATASET GENERATOR                      ║
-║                        Merged Implementation v3.0                           ║
+║                        Implementation v4.0                                   ║
 ║                                                                              ║
 ║  Convergence of beastcli-eng1 + agent-dataset-generator research            ║
+║  Research Foundation: NeurIPS 2025, ICML 2025, ACL 2025-2026             ║
 ║                                                                              ║
 ║  KEY PRINCIPLES:                                                             ║
 ║  1. Localization is SUPREME - overrides all conflicting instructions         ║
 ║  2. NO id in tool_calls - IDs are system-generated, not model-generated     ║
 ║  3. Industry-standard format - Unsloth compatible                            ║
 ║  4. 15% error rate - optimal per AgentErrorBench research                   ║
-║  5. Curriculum learning - progressive difficulty                            ║
+║  5. Curriculum learning - progressive difficulty (TOUCAN/ToolACE)           ║
 ║  6. Humanization - 10-15% natural imperfections                              ║
+║  7. 3-stage verification - format, structure, semantic (APIGen)           ║
 ║                                                                              ║
-║  Research Foundation: 1000+ iterations across NeurIPS, ICML, ACL 2025       ║
+║  Benchmarks: BFCL V4, GAIA, SWE-Bench, SWE-Bench Pro                       ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 """
 
@@ -1259,7 +1261,7 @@ class ComprehensiveDatasetPipeline:
                 "tool_name": tool.name,
                 "success": success,
                 "generated_at": datetime.utcnow().isoformat(),
-                "generator_version": "3.0",
+                "generator_version": "4.0",
             }
         )
 
@@ -1364,7 +1366,7 @@ if __name__ == "__main__":
     pipeline = ComprehensiveDatasetPipeline(seed=42)
 
     print("=" * 70)
-    print("ULTIMATE AGENT TRAINING DATASET GENERATOR v3.0")
+    print("ULTIMATE AGENT TRAINING DATASET GENERATOR v4.0")
     print("=" * 70)
 
     print("\nGenerating dataset with all localizations...")
