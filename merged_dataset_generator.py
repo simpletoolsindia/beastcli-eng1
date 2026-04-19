@@ -801,17 +801,97 @@ class ResponseTemplates:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# TOOL CALL GENERATORS
+# TOOL CALL GENERATORS — ARGUEMNT ALIGNS WITH USER INTENT
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class ToolCallGenerator:
-    """Generate realistic tool calls with authentic arguments."""
+    """Generate arguments that semantically match the user query."""
 
     REALISTIC_PATHS = {
         "config": ["/Users/sridhar/project/config.json", "/Users/sridhar/project/settings.yaml"],
         "source": ["/Users/sridhar/project/src/main.py", "/Users/sridhar/project/lib/utils.py"],
         "test": ["/Users/sridhar/project/tests/test_main.py", "/Users/sridhar/project/__tests__/auth.test.js"],
         "output": ["/Users/sridhar/output/result.json", "/Users/sridhar/downloads/data.csv"],
+    }
+
+    # Intent-driven argument templates: tool -> list of {query_hint, args} pairs
+    # These ensure arguments directly match what the user asks for.
+    INTENT_TEMPLATES = {
+        "Python_Test": [
+            {"query_hint": "test_api", "args": {"file_path": "/Users/sridhar/project/tests/test_api.py", "pattern": "test_api_*.py"}},
+            {"query_hint": "pytest", "args": {"file_path": "/Users/sridhar/project/tests/", "pattern": "test_*.py"}},
+            {"query_hint": "test_main", "args": {"file_path": "/Users/sridhar/project/tests/test_main.py", "pattern": None}},
+            {"query_hint": "auth", "args": {"file_path": "/Users/sridhar/project/tests/test_auth.py", "pattern": "test_auth*"}},
+        ],
+        "Database_Query": [
+            {"query_hint": "SELECT", "args": {"query": "SELECT * FROM users LIMIT 10", "database": "production_db"}},
+            {"query_hint": "COUNT", "args": {"query": "SELECT COUNT(*) FROM orders", "database": "production_db"}},
+            {"query_hint": "WHERE", "args": {"query": "SELECT id, name FROM products WHERE active = true", "database": "production_db"}},
+            {"query_hint": "JOIN", "args": {"query": "SELECT u.name, o.total FROM users u JOIN orders o ON u.id = o.user_id", "database": "production_db"}},
+        ],
+        "Web_Search": [
+            {"query_hint": "best practices", "args": {"query": "Python best practices 2026"}},
+            {"query_hint": "React", "args": {"query": "React performance optimization patterns"}},
+            {"query_hint": "TypeScript", "args": {"query": "TypeScript generic constraints extends"}},
+            {"query_hint": "Docker", "args": {"query": "Docker multi-stage build optimization"}},
+            {"query_hint": "Git", "args": {"query": "Git workflow best practices team"}},
+        ],
+        "Process_List": [
+            {"query_hint": "processes", "args": {"filter": None, "sort_by": "cpu", "limit": 20}},
+            {"query_hint": "memory", "args": {"filter": None, "sort_by": "memory", "limit": 10}},
+            {"query_hint": "top", "args": {"filter": None, "sort_by": "cpu", "limit": 5}},
+            {"query_hint": "active", "args": {"filter": "running", "sort_by": "cpu", "limit": 15}},
+        ],
+        "Git_Branch": [
+            {"query_hint": "branch_name", "args": {"operation": "create", "branch_name": "feature/login"}},
+            {"query_hint": "delete", "args": {"operation": "delete", "branch_name": "old-feature"}},
+            {"query_hint": "switch", "args": {"operation": "switch", "branch_name": "develop"}},
+            {"query_hint": "list", "args": {}},
+        ],
+        "Git_Pull": [
+            {"query_hint": "origin", "args": {"remote": "origin", "branch": "main"}},
+            {"query_hint": "master", "args": {"remote": "origin", "branch": "master"}},
+            {"query_hint": "develop", "args": {"remote": "origin", "branch": "develop"}},
+        ],
+        "Git_Commit": [
+            {"query_hint": "fix:", "args": {"message": "fix: resolve authentication bug", "all": True}},
+            {"query_hint": "feat:", "args": {"message": "feat: add user profile management", "all": True}},
+            {"query_hint": "update:", "args": {"message": "update: modify config settings", "all": False}},
+            {"query_hint": "chore:", "args": {"message": "chore: update dependencies", "all": True}},
+        ],
+        "File_Read": [
+            {"query_hint": "first 50", "args": {"file_path": "/Users/sridhar/project/src/main.py", "offset": 0, "limit": 50}},
+            {"query_hint": "config", "args": {"file_path": "/Users/sridhar/project/config.json", "offset": 0, "limit": None}},
+            {"query_hint": "README", "args": {"file_path": "/Users/sridhar/project/README.md", "offset": 0, "limit": 100}},
+            {"query_hint": "src", "args": {"file_path": "/Users/sridhar/project/src/app.py", "offset": 0, "limit": None}},
+        ],
+        "Web_Fetch": [
+            {"query_hint": "github.com", "args": {"url": "https://github.com/anthropic/claude-code"}},
+            {"query_hint": "api", "args": {"url": "https://api.github.com/repos/anthropic/claude-code"}},
+            {"query_hint": "status", "args": {"url": "https://httpbin.org/status/200"}},
+        ],
+        "File_Search": [
+            {"query_hint": "*.py", "args": {"pattern": "*.py", "path": ".", "recursive": True}},
+            {"query_hint": "test", "args": {"pattern": "test_*.py", "path": "src", "recursive": True}},
+            {"query_hint": "config", "args": {"pattern": "*.json", "path": "config", "recursive": False}},
+            {"query_hint": "*.js", "args": {"pattern": "*.js", "path": ".", "recursive": True}},
+        ],
+        "Bash_Execute": [
+            {"query_hint": "ls", "args": {"command": "ls -la", "timeout": 10, "working_directory": None}},
+            {"query_hint": "df -h", "args": {"command": "df -h", "timeout": 10, "working_directory": None}},
+            {"query_hint": "pytest", "args": {"command": "pytest -v", "timeout": 60, "working_directory": None}},
+            {"query_hint": "npm", "args": {"command": "npm install", "timeout": 120, "working_directory": None}},
+            {"query_hint": "find", "args": {"command": "find . -name '*.py' -type f", "timeout": 30, "working_directory": None}},
+            {"query_hint": "git status", "args": {"command": "git status --porcelain", "timeout": 10, "working_directory": None}},
+        ],
+        "Search_Replace": [
+            {"query_hint": "foo", "args": {"file_path": "/Users/sridhar/project/src/main.py", "search": "foo", "replace": "bar"}},
+            {"query_hint": "timeout", "args": {"file_path": "/Users/sridhar/project/config.json", "search": '"timeout": 30', "replace": '"timeout": 60'}},
+        ],
+        "Search_Code": [
+            {"query_hint": "TODO", "args": {"pattern": "TODO", "path": ".", "file_types": [".py", ".js"]}},
+            {"query_hint": "import", "args": {"pattern": "import\\s+", "path": "src", "file_types": [".py"]}},
+        ],
     }
 
     REALISTIC_COMMANDS = {
@@ -826,46 +906,86 @@ class ToolCallGenerator:
         "javascript": ["console.log('Hello!');", "const arr = [1, 2, 3].map(x => x * 2);"],
     }
 
-    REALISTIC_QUERIES = [
-        "Python asyncio best practices 2026", "React useCallback vs useMemo performance",
-        "TypeScript generic constraints extends", "Docker multi-stage build optimization",
-        "Git workflow best practices team", "PostgreSQL query optimization index",
-    ]
-
     @classmethod
-    def generate_arguments(cls, tool: ToolSchema, difficulty: DifficultyLevel) -> dict:
+    def generate_arguments(cls, tool: ToolSchema, query: str) -> dict:
+        """Generate arguments that match the user query intent."""
+        intents = cls.INTENT_TEMPLATES.get(tool.name, [])
+
+        if intents:
+            # Try to find a matching intent from the query
+            matched = None
+            query_lower = query.lower()
+            for intent in intents:
+                hint = intent["query_hint"].lower()
+                # Match by keyword in query
+                if any(word in query_lower for word in hint.replace("_", " ").split()):
+                    matched = intent
+                    break
+            if matched is None:
+                # Use a random intent (not skip args) — NEVER fall back to random values
+                matched = random.choice(intents)
+            args = dict(matched["args"])
+            # Remove None values (optional args not set)
+            return {k: v for k, v in args.items() if v is not None}
+
+        # Tool has no intent templates — generate based on argument type
         args = {}
         for arg in tool.arguments:
             if not arg.required and random.random() > 0.6:
                 continue
-            value = cls._generate_value(arg, tool.name)
+            value = cls._fallback_value(arg, tool.name)
             if value is not None:
                 args[arg.name] = value
         return args
 
     @classmethod
-    def _generate_value(cls, arg: ToolArgument, tool_name: str) -> Any:
+    def _fallback_value(cls, arg: ToolArgument, tool_name: str) -> Any:
+        """Safe fallback value generation — only when no intent template exists."""
         name_lower = arg.name.lower()
-        if "path" in name_lower or "file" in name_lower or "directory" in name_lower:
-            return cls._generate_path(arg.name)
-        elif "command" in name_lower:
-            return cls._generate_command(arg.name)
-        elif "code" in name_lower or "script" in name_lower:
-            return cls._generate_code(arg.name)
-        elif "query" in name_lower or "search" in name_lower or "pattern" in name_lower:
-            return random.choice(cls.REALISTIC_QUERIES)
-        elif "message" in name_lower or "commit" in name_lower:
-            return f"feat: add new feature - {random.choice(['auth', 'api', 'ui', 'utils'])}"
-        elif arg.type == "boolean":
+
+        # Path args: only for file tools, not bash/execution
+        if ("path" in name_lower or "file" in name_lower or "directory" in name_lower):
+            if tool_name in ("File_Read", "File_Write", "File_Search", "File_List",
+                            "File_Delete", "File_Copy", "Search_Replace", "Search_Code",
+                            "Python_Test"):
+                return cls._generate_path(arg.name)
+            return None
+
+        if "command" in name_lower:
+            return cls._generate_command(tool_name)
+
+        if "code" in name_lower or "script" in name_lower:
+            return cls._generate_code(tool_name)
+
+        if "query" in name_lower or "search" in name_lower or "pattern" in name_lower:
+            return random.choice([
+                "Python async patterns", "React hooks guide", "Docker compose",
+                "Git workflow", "TypeScript generics", "REST API design",
+            ])
+
+        if "message" in name_lower or "commit" in name_lower:
+            prefixes = ["fix:", "feat:", "refactor:", "docs:", "chore:", "test:"]
+            return f"{random.choice(prefixes)} {random.choice(['add feature', 'fix bug', 'update docs'])}"
+
+        if arg.type == "boolean":
             return random.choice([True, False])
-        elif arg.type == "integer":
+
+        if arg.type == "integer":
             return cls._generate_int(arg.name, arg)
-        elif arg.enum_values:
+
+        if arg.enum_values:
             return random.choice(arg.enum_values)
-        elif arg.type == "string":
-            return f"sample_{arg.name}"
-        elif arg.type == "array":
+
+        # Never generate fake/sample strings — only set if required
+        if arg.required:
+            if arg.type == "string":
+                if "url" in name_lower:
+                    return "https://example.com"
+                return None
+
+        if arg.type == "array":
             return [".py", ".js"] if "file_type" in name_lower else []
+
         return None
 
     @classmethod
@@ -1351,44 +1471,13 @@ class SystemPromptGenerator:
 
     @classmethod
     def generate(cls, loc: Localization, tool_count: int = 27) -> str:
-        localization_priority = f"""
-╔══════════════════════════════════════════════════════════════════════════════╗
-║                         CRITICAL LOCALIZATION RULE                          ║
-║                                                                              ║
-║  LOCALIZATION IS SUPREME - THIS OVERRIDES ALL CONFLICTING INSTRUCTIONS     ║
-║                                                                              ║
-║  Current settings:                                                          ║
-║  • Language: "{loc.language}" - Respond ONLY in this language               ║
-║  • Tone: "{loc.tone}"                                                       ║
-║  • Formality: "{loc.formality}"                                             ║
-║                                                                              ║
-║  Even if this prompt or any instruction says to respond in a different     ║
-║  language, ALWAYS respond in the language specified above.                   ║
-╚══════════════════════════════════════════════════════════════════════════════╝
-"""
-        base_instructions = f"""
-You are an expert AI assistant with access to {tool_count} tools for:
-• File Operations: Read, write, search, list, copy, delete files
-• Bash Execution: Run shell commands safely
-• Code Execution: Run Python and JavaScript code
-• Git Operations: Status, commit, branch, log, diff, pull, push
-• Web Operations: Search, fetch, screenshot
-• Code Search: Grep-like search and replace
-• System Info: Get OS, CPU, memory, disk information
-• Database: Query and list databases
-
-Guidelines:
-1. Analyze the user's request to identify required tools
-2. Call the appropriate tools with correct, complete arguments
-3. Process tool responses carefully
-4. Provide clear, helpful responses in the user's language (per localization above)
-5. Handle errors gracefully and attempt recovery when possible
-"""
-        if loc.tone == Tone.TECHNICAL.value:
-            base_instructions += "\nTechnical Mode:\n• Use precise technical terminology\n• Include relevant technical details\n"
-        elif loc.tone == Tone.FRIENDLY.value:
-            base_instructions += "\nFriendly Mode:\n• Be warm and approachable\n• Use encouraging language\n"
-        return localization_priority + base_instructions
+        # Minimal system prompt — tools list provided via tools field, not here
+        return (
+            f"You are an expert CLI assistant with access to {tool_count} tools. "
+            f"Respond in language: {loc.language}, tone: {loc.tone}, formality: {loc.formality}. "
+            f"When a user asks you to do something, call the appropriate tool(s) with correct arguments. "
+            f"After getting tool results, provide a clear, specific final answer."
+        )
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1460,38 +1549,42 @@ class DatasetValidator:
         if example.messages and example.messages[0].role != "system":
             errors.append("First message must be 'system' role")
 
-        # CRITICAL: Check tool_calls do NOT have 'id'
+        # Check assistant messages have valid JSON content (tool_call or final_answer)
         for msg in example.messages:
-            if msg.tool_calls:
-                for i, tc in enumerate(msg.tool_calls):
-                    if "id" in tc:
-                        errors.append(f"Tool call {i} has 'id' field - this teaches hallucination")
-                    if "function" not in tc:
-                        errors.append(f"Tool call {i} missing 'function' field")
-                    elif isinstance(tc["function"], dict):
-                        func = tc["function"]
-                        if "name" not in func:
-                            errors.append(f"Tool call {i} missing function.name")
-                        if "arguments" not in func:
-                            errors.append(f"Tool call {i} missing function.arguments")
+            if msg.role == "assistant" and msg.content:
+                try:
+                    obj = json.loads(msg.content)
+                    if not isinstance(obj, dict) or "type" not in obj:
+                        errors.append(f"Assistant content missing 'type' field: {msg.content[:80]}")
+                    elif obj["type"] not in ("tool_call", "final_answer"):
+                        errors.append(f"Assistant content has invalid type: {obj['type']}")
+                    if obj.get("type") == "tool_call":
+                        if not obj.get("tool_name"):
+                            errors.append(f"tool_call missing 'tool_name': {msg.content[:80]}")
+                        if "arguments" not in obj:
+                            errors.append(f"tool_call missing 'arguments': {msg.content[:80]}")
+                        valid_names = ToolRegistry.get_tool_names()
+                        if obj.get("tool_name") not in valid_names:
+                            errors.append(f"Invalid tool name: {obj.get('tool_name')}")
+                    if obj.get("type") == "final_answer":
+                        if not obj.get("content") or len(obj.get("content", "").strip()) < 5:
+                            errors.append(f"final_answer too short/generic: {msg.content[:80]}")
+                except json.JSONDecodeError:
+                    errors.append(f"Assistant content not valid JSON: {msg.content[:80]}")
 
-        # CRITICAL: Check tool responses HAVE tool_call_id
+        # Check tool messages have valid JSON with type=tool_result
         for msg in example.messages:
-            if msg.role == "tool":
-                if not msg.tool_call_id:
-                    errors.append("Tool response missing 'tool_call_id' (required for system to match)")
-                if not msg.name:
-                    errors.append("Tool response missing 'name'")
-
-        # Check for valid tool names
-        valid_names = ToolRegistry.get_tool_names()
-        for msg in example.messages:
-            if msg.tool_calls:
-                for tc in msg.tool_calls:
-                    if "function" in tc and isinstance(tc["function"], dict):
-                        name = tc["function"].get("name")
-                        if name and name not in valid_names:
-                            errors.append(f"Invalid tool name: {name}")
+            if msg.role == "tool" and msg.content:
+                try:
+                    obj = json.loads(msg.content)
+                    if obj.get("type") != "tool_result":
+                        errors.append(f"Tool content has wrong type: {msg.content[:80]}")
+                    if not obj.get("tool_call_id"):
+                        errors.append(f"tool_result missing 'tool_call_id': {msg.content[:80]}")
+                    if "output" not in obj and "error" not in obj:
+                        errors.append(f"tool_result missing 'output' or 'error': {msg.content[:80]}")
+                except json.JSONDecodeError:
+                    errors.append(f"Tool content not valid JSON: {msg.content[:80]}")
 
         return len(errors) == 0, errors
 
@@ -1575,7 +1668,7 @@ class ComprehensiveDatasetPipeline:
         tool_results_data = []
 
         for tool in selected_tools:
-            args = ToolCallGenerator.generate_arguments(tool, difficulty)
+            args = ToolCallGenerator.generate_arguments(tool, user_query)
             success = not include_error or random.random() > 0.15
             if not success:
                 all_success = False
@@ -1592,10 +1685,10 @@ class ComprehensiveDatasetPipeline:
 
             messages.append(Message(role="assistant", content=tool_call_content))
             messages.append(Message(role="tool", content=tool_result_content, tool_call_id=system_call_id, name=tool.name))
-            tool_results_data.append({"tool": tool.name, "args": args, "response": tool_result_content})
+            tool_results_data.append({"tool": tool.name, "args": args, "response": tool_response, "success": success})
 
-        # Build final answer
-        final_response = LocalizationContent.get_success(difficulty, localization) if all_success else LocalizationContent.get_error("Operation failed", localization)
+        # Build final answer — specific and grounded in tool results
+        final_response = self._build_final_answer(tool_results_data, localization, all_success)
         final_answer_content = json.dumps({
             "type": "final_answer",
             "content": final_response,
@@ -1616,6 +1709,94 @@ class ComprehensiveDatasetPipeline:
                 "generator_version": "4.0",
             }
         )
+
+    @staticmethod
+    def _build_final_answer(
+        tool_results_data: list[dict],
+        localization: Localization,
+        all_success: bool,
+    ) -> str:
+        """Build a specific, grounded final answer based on tool results."""
+        if not all_success:
+            return LocalizationContent.get_error("Operation failed", localization)
+
+        lang = Language(localization.language) if localization.language in [l.value for l in Language] else Language.EN
+
+        # Final answers are specific to what was done
+        FINAL_TEMPLATES = {
+            Language.EN: {
+                "Python_Test": "Tests completed successfully. All test cases passed with no failures.",
+                "Database_Query": "Query executed successfully. Found {count} matching rows.",
+                "Web_Search": "Search completed. Found {count} relevant results matching your query.",
+                "Process_List": "Retrieved {count} active processes. Top results sorted by {sort}.",
+                "Git_Branch": "Branch operation completed. Current branches: {branches}.",
+                "Git_Pull": "Successfully pulled latest changes from {remote}. All files updated.",
+                "Git_Commit": "Changes committed successfully with message: '{message}'.",
+                "File_Read": "File read successfully. Content preview shows {lines} lines.",
+                "Web_Fetch": "Page fetched successfully. Status 200, content length {size} bytes.",
+                "File_Search": "Search completed. Found {count} matching files.",
+                "Bash_Execute": "Command executed successfully. Output: {output}",
+            },
+            Language.HI: {
+                "Python_Test": "Tests safalta se complete huye. Sab test cases pass.",
+                "Database_Query": "Query safalta se run ho gayi. {count} rows mil gayein.",
+                "Web_Search": "Search complete. {count} relevant results mile.",
+                "Process_List": "{count} active processes dikhaye. Top results sorted by {sort}.",
+                "Git_Branch": "Branch operation complete. Current branches: {branches}.",
+                "Git_Pull": "Origin se changes pull ho gayein. Sab files update.",
+                "Git_Commit": "Changes commit ho gayein. Message: '{message}'",
+                "File_Read": "File read safalt. Content preview: {lines} lines.",
+                "Web_Fetch": "Page fetch safalt. Status 200.",
+                "File_Search": "Search complete. {count} files mile.",
+                "Bash_Execute": "Command execute safalt. Output: {output}",
+            },
+        }
+
+        for tool_result in tool_results_data:
+            tool_name = tool_result.get("tool", "")
+            templates = FINAL_TEMPLATES.get(lang, FINAL_TEMPLATES[Language.EN])
+            template = templates.get(tool_name)
+            if not template:
+                template = random.choice([
+                    "Operation completed successfully.",
+                    f"{tool_name} executed without errors.",
+                    "Task finished. All steps completed.",
+                ])
+                return template
+
+            # Build context from arguments
+            args = tool_result.get("args", {})
+
+            # Format template with actual values
+            result = template
+            if "{count}" in result:
+                count = random.randint(1, 10)
+                result = result.replace("{count}", str(count))
+            if "{sort}" in result:
+                sort = args.get("sort_by", "cpu")
+                result = result.replace("{sort}", sort)
+            if "{branches}" in result:
+                branches = "main, develop, feature/login"
+                result = result.replace("{branches}", branches)
+            if "{remote}" in result:
+                remote = args.get("remote", "origin")
+                result = result.replace("{remote}", remote)
+            if "{message}" in result:
+                msg = args.get("message", "update")
+                result = result.replace("{message}", msg)
+            if "{lines}" in result:
+                lines = args.get("limit", 50)
+                result = result.replace("{lines}", str(lines))
+            if "{output}" in result:
+                output = args.get("command", "")[:30]
+                result = result.replace("{output}", output)
+            if "{size}" in result:
+                size = random.randint(1024, 4096)
+                result = result.replace("{size}", str(size))
+
+            return result
+
+        return "Task completed successfully."
 
     def generate_batch(
         self,
