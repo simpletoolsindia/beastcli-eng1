@@ -9,5 +9,6 @@ build/
 *.jsonl
 !dataset.jsonl
 !sample.jsonl
+!output/merged_*.jsonl
 _unsloth/
 unsloth_output/
