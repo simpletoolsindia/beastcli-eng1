@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+*.jsonl
+!dataset.jsonl
+!sample.jsonl
+_unsloth/
+unsloth_output/
