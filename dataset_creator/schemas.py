@@ -1,0 +1,484 @@
+"""
+schemas.py — Data Types and Schemas
+===================================
+
+Defines all core data types following Anthropic API conventions
+and REQUIREMENTS.md schema sections 4.1–4.4.
+
+Design
+------
+Types are dataclasses for clarity and IDE support. Each type
+has `to_dict()` and `from_dict()` for serialization.
+
+Schema Reference
+---------------
+Based on Anthropic Claude Cookbooks (tool_use/customer_service_agent.ipynb):
+- Tool definitions use JSON Schema `input_schema`
+- Tool calls include `id`, `name`, `input`
+- Tool results include `tool_use_id`, `content`
+
+REQUIREMENTS.md aligns with this via provider-normalized schema:
+- tool_call.type = "tool_call"
+- tool_call.tool_name (not .name)
+- tool_call.arguments (not .input)
+"""
+
+from __future__ import annotations
+
+import uuid
+import json
+from dataclasses import dataclass, field
+from typing import Any, Optional
+
+
+# --------------------------------------------------------------------------
+# Message Types (REQUIREMENTS.md sections 4.1–4.4)
+# --------------------------------------------------------------------------
+
+
+@dataclass
+class ToolCall:
+    """
+    REQUIREMENTS.md section 4.2: Assistant Tool Call
+
+    Provider-normalized schema — works regardless of whether the
+    underlying provider uses Anthropic tool_use, OpenAI function_call,
+    or a custom format.
+
+    Example:
+        ToolCall(
+            tool_name="bash",
+            arguments={"command": "ls -la", "timeout": 30}
+        )
+    """
+    type: str = "tool_call"
+    id: str = ""
+    tool_name: str = ""
+    arguments: dict = field(default_factory=dict)
+
+    def __post_init__(self):
+        if not self.id:
+            self.id = f"call_{uuid.uuid4().hex[:8]}"
+
+    def to_dict(self) -> dict:
+        return {
+            "type": self.type,
+            "id": self.id,
+            "tool_name": self.tool_name,
+            "arguments": self.arguments,
+        }
+
+    def to_json(self) -> str:
+        return json.dumps(self.to_dict(), ensure_ascii=False)
+
+    @classmethod
+    def from_dict(cls, d: dict) -> ToolCall:
+        return cls(
+            type=d.get("type", "tool_call"),
+            id=d.get("id", ""),
+            tool_name=d.get("tool_name", ""),
+            arguments=d.get("arguments", {}),
+        )
+
+    @classmethod
+    def from_json(cls, json_str: str) -> ToolCall:
+        """Parse from JSON string — used when content is embedded in messages."""
+        return cls.from_dict(json.loads(json_str))
+
+
+@dataclass
+class ToolResult:
+    """
+    REQUIREMENTS.md section 4.3: Tool Response
+
+    Mirrors Anthropic's tool_result content block:
+    - tool_use_id matches the call ID from ToolCall.id
+    - output is the raw stdout / return value
+    - exit_code: 0 = success, non-zero = error
+    - error: optional error message when exit_code != 0
+
+    Example:
+        ToolResult(
+            tool_call_id="call_abc123",
+            output="file1.txt\\nfile2.py\\n",
+            exit_code=0
+        )
+    """
+    type: str = "tool_result"
+    tool_call_id: str = ""
+    output: str = ""
+    exit_code: int = 0
+    error: Optional[str] = None
+
+    def to_dict(self) -> dict:
+        d = {
+            "type": self.type,
+            "tool_call_id": self.tool_call_id,
+            "output": self.output,
+            "exit_code": self.exit_code,
+        }
+        if self.error:
+            d["error"] = self.error
+        return d
+
+    def to_json(self) -> str:
+        return json.dumps(self.to_dict(), ensure_ascii=False)
+
+    @classmethod
+    def from_dict(cls, d: dict) -> ToolResult:
+        return cls(
+            type=d.get("type", "tool_result"),
+            tool_call_id=d.get("tool_call_id", ""),
+            output=d.get("output", ""),
+            exit_code=d.get("exit_code", 0),
+            error=d.get("error"),
+        )
+
+    @classmethod
+    def from_json(cls, json_str: str) -> ToolResult:
+        return cls.from_dict(json.loads(json_str))
+
+    @property
+    def is_success(self) -> bool:
+        return self.exit_code == 0
+
+    @property
+    def is_error(self) -> bool:
+        return self.exit_code != 0
+
+
+@dataclass
+class FinalAnswer:
+    """
+    REQUIREMENTS.md section 4.4: Final Answer
+
+    Wraps the agent's final response. Must be non-empty.
+    This is what the model learns to produce as a terminating output.
+
+    Example:
+        FinalAnswer(content="Found 3 files matching '*.py' in src/")
+    """
+    type: str = "final_answer"
+    content: str = ""
+
+    def to_dict(self) -> dict:
+        return {"type": self.type, "content": self.content}
+
+    def to_json(self) -> str:
+        return json.dumps(self.to_dict(), ensure_ascii=False)
+
+    @classmethod
+    def from_dict(cls, d: dict) -> FinalAnswer:
+        return cls(
+            type=d.get("type", "final_answer"),
+            content=d.get("content", ""),
+        )
+
+    @classmethod
+    def from_json(cls, json_str: str) -> FinalAnswer:
+        return cls.from_dict(json.loads(json_str))
+
+
+# --------------------------------------------------------------------------
+# Message Role Types (REQUIREMENTS.md section 9.3)
+# --------------------------------------------------------------------------
+
+
+@dataclass
+class Message:
+    """
+    A single message in a training conversation.
+
+    Roles:
+        system  — Global instructions (one per sample, first)
+        user    — User request (at least one per sample)
+        assistant — Assistant content: tool_call JSON or final_answer JSON
+        tool    — Tool result: tool_result JSON
+
+    Note: In REQUIREMENTS.md's training format, assistant messages
+    contain JSON *strings* (serialized tool_call/final_answer objects),
+    not parsed JSON objects. The role is always "assistant".
+    """
+    role: str  # "system" | "user" | "assistant" | "tool"
+    content: str
+
+    def to_dict(self) -> dict:
+        return {"role": self.role, "content": self.content}
+
+    @classmethod
+    def from_dict(cls, d: dict) -> Message:
+        return cls(role=d.get("role", ""), content=d.get("content", ""))
+
+    @classmethod
+    def system(cls, content: str) -> Message:
+        return cls(role="system", content=content)
+
+    @classmethod
+    def user(cls, content: str) -> Message:
+        return cls(role="user", content=content)
+
+    @classmethod
+    def assistant(cls, content: str) -> Message:
+        return cls(role="assistant", content=content)
+
+    @classmethod
+    def tool(cls, content: str) -> Message:
+        return cls(role="tool", content=content)
+
+    def is_json(self) -> bool:
+        """Check if content parses as valid JSON."""
+        try:
+            json.loads(self.content)
+            return True
+        except (json.JSONDecodeError, TypeError):
+            return False
+
+    def parse_content(self) -> dict:
+        """Parse content as JSON, return {} on failure."""
+        try:
+            return json.loads(self.content)
+        except (json.JSONDecodeError, TypeError):
+            return {}
+
+    def content_type(self) -> Optional[str]:
+        """Return the type field if content is valid JSON, else None."""
+        d = self.parse_content()
+        return d.get("type") if d else None
+
+
+# --------------------------------------------------------------------------
+# Training Sample
+# --------------------------------------------------------------------------
+
+
+@dataclass
+class TrainingSample:
+    """
+    REQUIREMENTS.md section 9.3: Unsloth Training Format
+
+    A single training sample = one JSONL line.
+    Contains a full conversation: system → user → tool_call* → tool_result* → final_answer
+
+    The assistant's content field always contains a JSON STRING
+    (serialized ToolCall or FinalAnswer), NOT a parsed object.
+    This is the critical training signal.
+
+    Example JSONL line:
+        {
+          "messages": [
+            {"role": "system", "content": "You are an agent..."},
+            {"role": "user", "content": "Run hello.py"},
+            {"role": "assistant", "content": "{\"type\":\"tool_call\",...}"},
+            {"role": "tool", "content": "{\"type\":\"tool_result\",...}"},
+            {"role": "assistant", "content": "{\"type\":\"final_answer\",...}"}
+          ]
+        }
+    """
+    messages: list[Message] = field(default_factory=list)
+
+    def to_dict(self) -> dict:
+        return {"messages": [m.to_dict() for m in self.messages]}
+
+    def to_jsonl(self) -> str:
+        return json.dumps(self.to_dict(), ensure_ascii=False)
+
+    @classmethod
+    def from_dict(cls, d: dict) -> TrainingSample:
+        return cls(messages=[Message.from_dict(m) for m in d.get("messages", [])])
+
+    @classmethod
+    def from_jsonl(cls, line: str) -> TrainingSample:
+        return cls.from_dict(json.loads(line))
+
+    # Convenience accessors
+
+    def tool_calls(self) -> list[ToolCall]:
+        """Extract all tool_call objects from assistant messages."""
+        calls = []
+        for msg in self.messages:
+            if msg.role == "assistant":
+                try:
+                    d = json.loads(msg.content)
+                    if d.get("type") == "tool_call":
+                        calls.append(ToolCall.from_dict(d))
+                except (json.JSONDecodeError, TypeError):
+                    pass
+        return calls
+
+    def tool_results(self) -> list[ToolResult]:
+        """Extract all tool_result objects from tool messages."""
+        results = []
+        for msg in self.messages:
+            if msg.role == "tool":
+                try:
+                    d = json.loads(msg.content)
+                    if d.get("type") == "tool_result":
+                        results.append(ToolResult.from_dict(d))
+                except (json.JSONDecodeError, TypeError):
+                    pass
+        return results
+
+    def final_answer(self) -> Optional[FinalAnswer]:
+        """Extract final_answer from the last assistant message."""
+        for msg in reversed(self.messages):
+            if msg.role == "assistant":
+                try:
+                    d = json.loads(msg.content)
+                    if d.get("type") == "final_answer":
+                        return FinalAnswer.from_dict(d)
+                except (json.JSONDecodeError, TypeError):
+                    pass
+        return None
+
+    def user_request(self) -> Optional[str]:
+        """Get the first user message content."""
+        for msg in self.messages:
+            if msg.role == "user":
+                return msg.content
+        return None
+
+    def system_prompt(self) -> Optional[str]:
+        """Get the system prompt content."""
+        for msg in self.messages:
+            if msg.role == "system":
+                return msg.content
+        return None
+
+    def step_count(self) -> int:
+        """Number of tool calls in this sample."""
+        return len(self.tool_calls())
+
+    def is_valid_schema(self) -> bool:
+        """Basic schema validity: has user message, ends with final_answer."""
+        has_user = any(m.role == "user" for m in self.messages)
+        has_final = self.final_answer() is not None
+        return has_user and has_final
+
+    def token_estimate(self) -> int:
+        """Rough token estimate: 1 token ≈ 4 characters."""
+        return sum(len(json.dumps(m.to_dict())) for m in self.messages) // 4
+
+    def add_system(self, content: str) -> None:
+        """Prepend system message."""
+        self.messages.insert(0, Message.system(content))
+
+    def add_user(self, content: str) -> None:
+        """Append user message."""
+        self.messages.append(Message.user(content))
+
+    def add_tool_call(self, call: ToolCall) -> None:
+        """Append assistant message with serialized tool_call."""
+        self.messages.append(Message.assistant(call.to_json()))
+
+    def add_tool_result(self, result: ToolResult) -> None:
+        """Append tool message with serialized tool_result."""
+        self.messages.append(Message.tool(result.to_json()))
+
+    def add_final_answer(self, answer: FinalAnswer) -> None:
+        """Append assistant message with serialized final_answer."""
+        self.messages.append(Message.assistant(answer.to_json()))
+
+
+# --------------------------------------------------------------------------
+# Tool Registry Types
+# --------------------------------------------------------------------------
+
+
+@dataclass
+class ToolArg:
+    """
+    A single argument definition for a tool.
+    Mirrors JSON Schema property format from Anthropic Cookbooks.
+    """
+    name: str
+    type: str = "string"  # "string" | "integer" | "number" | "boolean" | "array" | "object"
+    description: str = ""
+    required: bool = True
+    default: Any = None
+    enum: list = field(default_factory=list)
+
+    def to_schema(self) -> dict:
+        schema = {
+            "type": self.type,
+            "description": self.description,
+        }
+        if self.enum:
+            schema["enum"] = self.enum
+        if self.default is not None and not self.required:
+            schema["default"] = self.default
+        return schema
+
+
+@dataclass
+class Tool:
+    """
+    Tool definition — mirrors Anthropic tool definition format
+    from the Claude Cookbooks (tool_use/customer_service_agent.ipynb).
+
+    Example:
+        Tool(
+            name="bash",
+            description="Execute a bash command",
+            category="execution",
+            args=[
+                ToolArg(name="command", description="The command to run", required=True),
+                ToolArg(name="timeout", description="Timeout in seconds", required=False, default=30),
+            ]
+        )
+    """
+    name: str
+    description: str
+    category: str  # "filesystem" | "execution" | "git" | "web" | "utility"
+    args: list[ToolArg] = field(default_factory=list)
+    tags: list[str] = field(default_factory=list)  # e.g., "dangerous", "network", "slow"
+
+    def to_anthropic_schema(self) -> dict:
+        """Convert to Anthropic tool definition format."""
+        properties = {}
+        required = []
+        for arg in self.args:
+            properties[arg.name] = arg.to_schema()
+            if arg.required:
+                required.append(arg.name)
+
+        return {
+            "name": self.name,
+            "description": self.description,
+            "input_schema": {
+                "type": "object",
+                "properties": properties,
+                "required": required if required else None,
+            },
+        }
+
+    def required_arg_names(self) -> set[str]:
+        return {a.name for a in self.args if a.required}
+
+    def optional_arg_names(self) -> set[str]:
+        return {a.name for a in self.args if not a.required}
+
+    def all_arg_names(self) -> set[str]:
+        return {a.name for a in self.args}
+
+    def validate_args(self, args: dict) -> tuple[bool, list[str]]:
+        """
+        Validate arguments against this tool's schema.
+        Returns (is_valid, list_of_errors).
+        """
+        errors = []
+        for req_arg in self.required_arg_names():
+            if req_arg not in args:
+                errors.append(f"missing required argument: {req_arg}")
+
+        for arg_name, arg_value in args.items():
+            if arg_name not in self.all_arg_names():
+                errors.append(f"unknown argument: {arg_name}")
+            else:
+                arg_def = next(a for a in self.args if a.name == arg_name)
+                if arg_def.enum and arg_value not in arg_def.enum:
+                    errors.append(
+                        f"invalid value for '{arg_name}': "
+                        f"{arg_value!r} not in {arg_def.enum}"
+                    )
+
+        return len(errors) == 0, errors
