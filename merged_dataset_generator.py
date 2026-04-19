@@ -933,13 +933,31 @@ class ResponseGenerator:
     }
 
     SUCCESS_TEMPLATES = {
-        "File_Read": {"template": {"status": "success", "bytes_read": 1234, "lines_read": 42}},
-        "File_Write": {"template": {"status": "success", "bytes_written": 567}},
-        "File_List": {"template": {"status": "success", "entries": [{"name": "src", "type": "directory"}, {"name": "README.md", "type": "file"}], "total_entries": 2}},
-        "Bash_Execute": {"template": {"status": "success", "exit_code": 0, "stdout": "command output here\n", "stderr": ""}},
-        "Git_Status": {"template": {"status": "success", "branch": "main", "is_dirty": True, "staged": [], "modified": [], "untracked": []}},
-        "Web_Search": {"template": {"status": "success", "results": [{"title": "Result", "url": "https://example.com", "snippet": "..."}], "total_results": 5}},
-        "Python_Run": {"template": {"status": "success", "stdout": "Hello, World!\n", "stderr": "", "return_value": None}},
+        "File_Read": {"template": {"path": "{file_path}", "bytes_read": 1234, "lines_read": 42, "content_preview": "# Sample file...\nLine 1\nLine 2"}},
+        "File_Write": {"template": {"path": "{file_path}", "bytes_written": 567, "lines_written": 12}},
+        "File_List": {"template": {"entries": [{"name": "src", "type": "directory"}, {"name": "README.md", "type": "file"}, {"name": "main.py", "type": "file"}], "total": 3}},
+        "File_Search": {"template": {"matches": ["src/main.py", "src/utils.py", "tests/test_main.py"], "total": 3}},
+        "File_Delete": {"template": {"path": "{file_path}", "deleted": True}},
+        "File_Copy": {"template": {"source": "{file_path}", "destination": "/path/to/copy", "copied": True}},
+        "Bash_Execute": {"template": {"stdout": "command output here\n", "stderr": "", "exit_code": 0}},
+        "Git_Status": {"template": {"branch": "main", "is_dirty": True, "staged": ["README.md"], "modified": ["src/main.py"], "untracked": ["new.py"]}},
+        "Git_Commit": {"template": {"branch": "main", "commit_hash": "abc1234", "message": "{message}", "files_changed": 2}},
+        "Git_Log": {"template": {"commits": [{"hash": "abc1234", "message": "fix: resolve bug", "author": "Dev <dev@example.com>"}, {"hash": "def5678", "message": "feat: add feature", "author": "Dev <dev@example.com>"}]}},
+        "Git_Branch": {"template": {"current": "main", "branches": ["main", "develop", "feature/x"]}},
+        "Git_Diff": {"template": {"files": [{"path": "src/main.py", "additions": 5, "deletions": 2}]}},
+        "Git_Push": {"template": {"remote": "origin", "branch": "main", "pushed": True}},
+        "Git_Pull": {"template": {"remote": "origin", "branch": "main", "files_updated": 3, " insertions": 45}},
+        "Web_Search": {"template": {"results": [{"title": "Result Title", "url": "https://example.com", "snippet": "A relevant article about..."}], "total": 5}},
+        "Web_Fetch": {"template": {"url": "{url}", "status": 200, "content_length": 2048, "content_type": "text/html"}},
+        "Web_Screenshot": {"template": {"url": "{url}", "captured": True, "width": 1920, "height": 1080}},
+        "Python_Run": {"template": {"stdout": "Hello, World!\n", "stderr": "", "return_value": None, "exit_code": 0}},
+        "Node_Run": {"template": {"stdout": "Hello, World!\n", "stderr": "", "exit_code": 0}},
+        "Search_Code": {"template": {"matches": [{"file": "src/main.py", "line": 42, "context": "def main():"}], "total": 1}},
+        "Search_Replace": {"template": {"file": "{file_path}", "replacements": 1, "changed": True}},
+        "System_Info": {"template": {"os": "Linux x86_64", "python_version": "3.11.0", "cpu_count": 8, "memory_total_gb": 32}},
+        "Process_List": {"template": {"processes": [{"pid": 1234, "name": "python", "cpu": "2.5%"}, {"pid": 5678, "name": "node", "cpu": "1.2%"}], "total": 2}},
+        "Database_Query": {"template": {"rows": [{"id": 1, "name": "Alice"}, {"id": 2, "name": "Bob"}], "total": 2, "columns": ["id", "name"]}},
+        "Database_List": {"template": {"databases": ["production", "test_db"], "total": 2}},
     }
 
     @classmethod
@@ -950,6 +968,7 @@ class ResponseGenerator:
 
     @classmethod
     def _generate_success(cls, tool: ToolSchema, args: dict) -> str:
+        # Return industry-standard tool_result format
         template = cls.SUCCESS_TEMPLATES.get(tool.name)
         if template:
             response = template["template"].copy()
@@ -957,8 +976,17 @@ class ResponseGenerator:
                 for resp_key, resp_value in response.items():
                     if isinstance(resp_value, str) and "{" + key + "}" in resp_value:
                         response[resp_key] = resp_value.replace("{" + key + "}", str(value))
-            return json.dumps(response)
-        return json.dumps({"status": "success", "tool": tool.name, "args": args})
+            result = {
+                "type": "tool_result",
+                "tool_call_id": "{{TOOL_CALL_ID}}",
+                "output": json.dumps(response),
+            }
+            return json.dumps(result)
+        return json.dumps({
+            "type": "tool_result",
+            "tool_call_id": "{{TOOL_CALL_ID}}",
+            "output": f"Executed {tool.name} successfully",
+        })
 
     @classmethod
     def _generate_error(cls, tool: ToolSchema, args: dict) -> str:
@@ -967,7 +995,13 @@ class ResponseGenerator:
         error_message = error_info["error"]
         for key, value in args.items():
             error_message = error_message.replace("{" + key + "}", str(value))
-        return json.dumps({"status": "error", "error": error_message, "code": error_info["code"], "tool": tool.name})
+        return json.dumps({
+            "type": "tool_result",
+            "tool_call_id": "{{TOOL_CALL_ID}}",
+            "output": "",
+            "error": error_message,
+            "exit_code": 1,
+        })
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -979,34 +1013,320 @@ class QueryTemplates:
 
     TEMPLATES = {
         "File_Read": {
-            DifficultyLevel.EASY: ["Read the file at /Users/sridhar/project/config.json", "Show me what's in main.py"],
-            DifficultyLevel.MEDIUM: ["Can you read the first 50 lines of this file?", "What's in the README?"],
-            DifficultyLevel.HARD: ["Read the configuration file and tell me what the database connection string is"],
+            DifficultyLevel.EASY: [
+                "Read the file at /Users/sridhar/project/config.json",
+                "Show me what's in main.py",
+                "Can you open and display src/app.py?",
+                "What does the setup.py file contain?",
+            ],
+            DifficultyLevel.MEDIUM: [
+                "Can you read the first 50 lines of this file?",
+                "What's in the README?",
+                "Show me the contents of the lib/utils.py file",
+            ],
+            DifficultyLevel.HARD: [
+                "Read the configuration file and tell me what the database connection string is",
+                "Find and read the main entry point of the project",
+            ],
+            DifficultyLevel.EXPERT: [
+                "Read all Python files in the src directory and summarize their purpose",
+            ],
         },
         "File_Write": {
-            DifficultyLevel.EASY: ["Write this content to output.txt", "Create a new file called test.py"],
-            DifficultyLevel.MEDIUM: ["Append this log entry to the existing file"],
+            DifficultyLevel.EASY: [
+                "Write this content to output.txt",
+                "Create a new file called test.py with the content: print('Hello')",
+                "Save the following to data.json: {\"key\": \"value\"}",
+            ],
+            DifficultyLevel.MEDIUM: [
+                "Append this log entry to the existing file",
+                "Create README.md with installation instructions",
+            ],
+            DifficultyLevel.HARD: [
+                "Create a new Python module at src/models.py with a User class",
+            ],
+            DifficultyLevel.EXPERT: [
+                "Write a complete CLI tool to output/logic.py with argument parsing",
+            ],
+        },
+        "File_List": {
+            DifficultyLevel.EASY: [
+                "List the files in /Users/sridhar/project",
+                "What's in the current directory?",
+                "Show me the project structure",
+            ],
+            DifficultyLevel.MEDIUM: [
+                "List all files in the src directory including hidden ones",
+                "What files are in the config folder?",
+            ],
+            DifficultyLevel.HARD: [
+                "List all files recursively in the project and show me the tree structure",
+            ],
+            DifficultyLevel.EXPERT: [
+                "List and categorize all files by type (source, test, config, docs)",
+            ],
+        },
+        "File_Search": {
+            DifficultyLevel.EASY: [
+                "Find all Python files in this project",
+                "Search for *.json files in the config directory",
+            ],
+            DifficultyLevel.MEDIUM: [
+                "Find all files containing the word 'config' in their name",
+                "Search for test files matching the pattern test_*.py",
+            ],
+            DifficultyLevel.HARD: [
+                "Find all markdown documentation files and tell me which ones mention 'setup'",
+            ],
+            DifficultyLevel.EXPERT: [
+                "Search recursively for all files with .py and .js extensions and group by directory",
+            ],
+        },
+        "File_Delete": {
+            DifficultyLevel.EASY: [
+                "Delete the temporary file /tmp/cache.log",
+                "Remove output.json from the current directory",
+            ],
+            DifficultyLevel.MEDIUM: [
+                "Delete the backup file backup_old.py",
+            ],
+            DifficultyLevel.HARD: [
+                "Clean up all .pyc files in the build directory",
+            ],
+        },
+        "File_Copy": {
+            DifficultyLevel.EASY: [
+                "Copy README.md to README_backup.md",
+                "Duplicate the config file as config.old",
+            ],
+            DifficultyLevel.MEDIUM: [
+                "Copy the entire src directory to src_backup",
+            ],
         },
         "Bash_Execute": {
-            DifficultyLevel.EASY: ["Run `ls -la` in the current directory", "Check disk usage with df -h"],
-            DifficultyLevel.MEDIUM: ["Find all Python files modified in the last 7 days"],
-            DifficultyLevel.HARD: ["Run the test suite and tell me if all tests pass"],
+            DifficultyLevel.EASY: [
+                "Run `ls -la` in the current directory",
+                "Check disk usage with df -h",
+                "Show me the current working directory",
+            ],
+            DifficultyLevel.MEDIUM: [
+                "Find all Python files modified in the last 7 days",
+                "Count the number of lines in all .py files",
+                "Show me the top 5 processes by memory usage",
+            ],
+            DifficultyLevel.HARD: [
+                "Run the test suite and tell me if all tests pass",
+                "Install dependencies from requirements.txt and verify",
+            ],
+            DifficultyLevel.EXPERT: [
+                "Analyze the codebase, find all TODO comments, and summarize them",
+            ],
+        },
+        "Bash_ShellStatus": {
+            DifficultyLevel.EASY: [
+                "What is the current shell environment?",
+                "Show me the current OS, user, and working directory",
+            ],
+            DifficultyLevel.MEDIUM: [
+                "What shell am I using and what is my home directory?",
+            ],
         },
         "Git_Status": {
-            DifficultyLevel.EASY: ["What's the current git status?", "Show me uncommitted changes"],
-            DifficultyLevel.MEDIUM: ["Are there any files that need to be committed?"],
+            DifficultyLevel.EASY: [
+                "What's the current git status?",
+                "Show me uncommitted changes",
+                "Are there any changes in the repository?",
+            ],
+            DifficultyLevel.MEDIUM: [
+                "Are there any files that need to be committed?",
+                "Check what files have been modified since the last commit",
+            ],
         },
         "Git_Commit": {
-            DifficultyLevel.EASY: ["Commit the changes with message 'fix: resolve bug'"],
-            DifficultyLevel.MEDIUM: ["Commit all changes with a descriptive message following conventional commits"],
+            DifficultyLevel.EASY: [
+                "Commit the changes with message 'fix: resolve bug'",
+                "Stage and commit all changes with the message 'update: modify config'",
+            ],
+            DifficultyLevel.MEDIUM: [
+                "Commit all changes with a descriptive message following conventional commits",
+            ],
+            DifficultyLevel.HARD: [
+                "Stage the modified files and commit with a properly formatted commit message",
+            ],
+        },
+        "Git_Log": {
+            DifficultyLevel.EASY: [
+                "Show me the last 5 commits",
+                "What is the commit history?",
+            ],
+            DifficultyLevel.MEDIUM: [
+                "Display the last 10 commits in short format",
+                "Show me the commit history with dates and authors",
+            ],
+        },
+        "Git_Branch": {
+            DifficultyLevel.EASY: [
+                "List all branches in this repository",
+                "What branches exist?",
+            ],
+            DifficultyLevel.MEDIUM: [
+                "Create a new branch called feature/login",
+                "Switch to the develop branch",
+            ],
+            DifficultyLevel.HARD: [
+                "Delete the old feature branch that is fully merged",
+            ],
+        },
+        "Git_Diff": {
+            DifficultyLevel.EASY: [
+                "Show me the changes in src/main.py",
+                "What's different from the last commit?",
+            ],
+            DifficultyLevel.MEDIUM: [
+                "Show all unstaged changes across the entire project",
+            ],
+            DifficultyLevel.HARD: [
+                "Compare the current branch with main and show me the summary",
+            ],
+        },
+        "Git_Push": {
+            DifficultyLevel.EASY: [
+                "Push commits to origin main",
+                "Push my changes to the remote repository",
+            ],
+            DifficultyLevel.MEDIUM: [
+                "Push all branches to the origin remote",
+            ],
+        },
+        "Git_Pull": {
+            DifficultyLevel.EASY: [
+                "Pull the latest changes from origin main",
+                "Update my local branch with remote changes",
+            ],
         },
         "Web_Search": {
-            DifficultyLevel.EASY: ["Search for Python best practices 2026", "Find information about React performance"],
-            DifficultyLevel.MEDIUM: ["Search for articles about async/await patterns in Python"],
+            DifficultyLevel.EASY: [
+                "Search for Python best practices 2026",
+                "Find information about React performance optimization",
+            ],
+            DifficultyLevel.MEDIUM: [
+                "Search for articles about async/await patterns in Python",
+                "Find documentation on TypeScript generics",
+            ],
+            DifficultyLevel.HARD: [
+                "Search for recent papers or articles on LLM fine-tuning techniques",
+            ],
+            DifficultyLevel.EXPERT: [
+                "Research best practices for building production-grade CLI tools in Rust",
+            ],
+        },
+        "Web_Fetch": {
+            DifficultyLevel.EASY: [
+                "Fetch the README from github.com/example/repo",
+                "Get the content of https://api.example.com/status",
+            ],
+            DifficultyLevel.MEDIUM: [
+                "Fetch the latest release notes from the project documentation",
+            ],
+        },
+        "Web_Screenshot": {
+            DifficultyLevel.EASY: [
+                "Take a screenshot of https://example.com",
+                "Capture the homepage of the documentation site",
+            ],
         },
         "Python_Run": {
-            DifficultyLevel.EASY: ["Run this Python code: print('Hello, World!')"],
-            DifficultyLevel.MEDIUM: ["Calculate fibonacci(30) using recursion"],
+            DifficultyLevel.EASY: [
+                "Run this Python code: print('Hello, World!')",
+                "Execute: result = sum(range(1, 101)); print(result)",
+            ],
+            DifficultyLevel.MEDIUM: [
+                "Calculate fibonacci(30) using recursion",
+                "Run a Python script that parses a JSON file",
+            ],
+            DifficultyLevel.HARD: [
+                "Execute a Python script that makes an HTTP request and prints the response",
+            ],
+            DifficultyLevel.EXPERT: [
+                "Run a data processing pipeline that reads CSV, transforms data, and outputs statistics",
+            ],
+        },
+        "Node_Run": {
+            DifficultyLevel.EASY: [
+                "Run this JavaScript: console.log('Hello from Node!')",
+                "Execute: const arr = [1,2,3].map(x => x * 2); console.log(arr);",
+            ],
+            DifficultyLevel.MEDIUM: [
+                "Run a Node script that reads a file and prints its contents",
+            ],
+        },
+        "Python_Test": {
+            DifficultyLevel.EASY: [
+                "Run pytest on tests/test_main.py",
+                "Execute the test suite for the auth module",
+            ],
+            DifficultyLevel.MEDIUM: [
+                "Run all tests matching the pattern test_api_*.py",
+            ],
+            DifficultyLevel.HARD: [
+                "Run tests with verbose output and show me the coverage report",
+            ],
+        },
+        "Search_Code": {
+            DifficultyLevel.EASY: [
+                "Find all occurrences of 'TODO' in the codebase",
+                "Search for 'def main' in all Python files",
+            ],
+            DifficultyLevel.MEDIUM: [
+                "Find lines containing 'import' statements across the project",
+            ],
+            DifficultyLevel.HARD: [
+                "Search for all error handling patterns (try/except blocks) in the code",
+            ],
+        },
+        "Search_Replace": {
+            DifficultyLevel.EASY: [
+                "Replace all occurrences of 'foo' with 'bar' in src/main.py",
+            ],
+            DifficultyLevel.MEDIUM: [
+                "In the config.json file, replace the timeout value from 30 to 60",
+            ],
+            DifficultyLevel.HARD: [
+                "Update all import statements from 'utils' to 'helpers' across the project",
+            ],
+        },
+        "System_Info": {
+            DifficultyLevel.EASY: [
+                "What is the current system information?",
+                "Show me the OS, CPU, and memory details",
+            ],
+            DifficultyLevel.MEDIUM: [
+                "Get the system information and tell me how many CPU cores are available",
+            ],
+        },
+        "Process_List": {
+            DifficultyLevel.EASY: [
+                "Show me the running processes",
+                "List all active processes",
+            ],
+            DifficultyLevel.MEDIUM: [
+                "Show me the top 10 processes by CPU usage",
+            ],
+        },
+        "Database_Query": {
+            DifficultyLevel.EASY: [
+                "Run the query: SELECT * FROM users LIMIT 10",
+                "Execute: SELECT COUNT(*) FROM orders",
+            ],
+            DifficultyLevel.MEDIUM: [
+                "Query the database for all orders placed in the last 30 days",
+            ],
+        },
+        "Database_List": {
+            DifficultyLevel.EASY: [
+                "List all databases on this server",
+                "Show me all available databases",
+            ],
         },
     }
 
@@ -1091,12 +1411,14 @@ class Message:
     name: str | None = None          # Only in tool responses
 
     def to_dict(self) -> dict:
+        """
+        Unsloth-compatible format:
+        - Assistant messages have content as JSON string (tool_call or final_answer)
+        - Tool messages have content as JSON string (tool_result) + tool_call_id
+        """
         result = {"role": self.role}
         if self.content is not None:
             result["content"] = self.content
-        # Tool calls WITHOUT id (CRITICAL: prevents hallucination)
-        if self.tool_calls:
-            result["tool_calls"] = self.tool_calls
         # tool_call_id ONLY in tool responses (system-generated)
         if self.tool_call_id:
             result["tool_call_id"] = self.tool_call_id
@@ -1218,48 +1540,78 @@ class ComprehensiveDatasetPipeline:
         localization: Localization,
         difficulty: DifficultyLevel = DifficultyLevel.EASY,
         include_error: bool = False,
+        multi_tool: bool = False,
     ) -> DatasetExample:
-        """Generate a single training example."""
-        tool = random.choice(self.tools)
+        """Generate a training example in Unsloth-compatible format.
+
+        Message schema:
+        - system: System prompt
+        - user: User request
+        - assistant: {"type":"tool_call","tool_name":"...","arguments":{...}}
+        - tool: {"type":"tool_result","tool_call_id":"...","output":"..."}
+        - (optionally more tool_call/tool pairs for multi_tool samples)
+        - assistant: {"type":"final_answer","content":"..."}
+
+        Multi-tool samples (multi_tool=True) generate 2-3 related tool calls
+        per sample to reduce structural duplication and teach tool chaining.
+        """
+        # Select 1-3 tools based on difficulty and multi_tool flag
+        num_tools = 1
+        if multi_tool and difficulty in (DifficultyLevel.MEDIUM, DifficultyLevel.HARD, DifficultyLevel.EXPERT):
+            num_tools = random.randint(2, 3)
+
+        selected_tools = random.sample(self.tools, k=min(num_tools, len(self.tools)))
+
         system_prompt = SystemPromptGenerator.generate(localization, len(self.tools))
-        user_query = QueryTemplates.get_query(tool, difficulty, localization)
-        args = ToolCallGenerator.generate_arguments(tool, difficulty)
-
-        # 15% error rate (optimal per AgentErrorBench)
-        success = not include_error or random.random() > 0.15
-
-        tool_response = ResponseGenerator.generate_response(tool, args, success)
-        final_response = LocalizationContent.get_success(difficulty, localization) if success else LocalizationContent.get_error("Operation failed", localization)
-
-        # System generates tool_call_id (NOT model-generated)
-        system_call_id = f"call_{uuid.uuid4().hex[:12]}"
-
-        # Build tool_calls WITHOUT id (industry standard)
-        tool_calls = [{
-            "type": "function",
-            "function": {
-                "name": tool.name,
-                "arguments": json.dumps(args, ensure_ascii=False)
-            }
-        }]
+        user_query = QueryTemplates.get_query(selected_tools[0], difficulty, localization)
 
         # Build messages
         messages = [
             Message(role="system", content=system_prompt),
             Message(role="user", content=user_query),
-            Message(role="assistant", content=ResponseTemplates.get_progress(localization), tool_calls=tool_calls),
-            Message(role="tool", content=tool_response, tool_call_id=system_call_id, name=tool.name),
-            Message(role="assistant", content=final_response),
         ]
+
+        all_success = True
+        tool_results_data = []
+
+        for tool in selected_tools:
+            args = ToolCallGenerator.generate_arguments(tool, difficulty)
+            success = not include_error or random.random() > 0.15
+            if not success:
+                all_success = False
+
+            tool_call_content = json.dumps({
+                "type": "tool_call",
+                "tool_name": tool.name,
+                "arguments": args,
+            }, ensure_ascii=False)
+
+            tool_response = ResponseGenerator.generate_response(tool, args, success)
+            system_call_id = f"call_{uuid.uuid4().hex[:12]}"
+            tool_result_content = tool_response.replace("{{TOOL_CALL_ID}}", system_call_id)
+
+            messages.append(Message(role="assistant", content=tool_call_content))
+            messages.append(Message(role="tool", content=tool_result_content, tool_call_id=system_call_id, name=tool.name))
+            tool_results_data.append({"tool": tool.name, "args": args, "response": tool_result_content})
+
+        # Build final answer
+        final_response = LocalizationContent.get_success(difficulty, localization) if all_success else LocalizationContent.get_error("Operation failed", localization)
+        final_answer_content = json.dumps({
+            "type": "final_answer",
+            "content": final_response,
+        }, ensure_ascii=False)
+        messages.append(Message(role="assistant", content=final_answer_content))
 
         return DatasetExample(
             messages=messages,
             localization=localization,
             metadata={
                 "difficulty": difficulty.value,
-                "tool_category": tool.category,
-                "tool_name": tool.name,
-                "success": success,
+                "tool_category": selected_tools[0].category,
+                "tool_name": selected_tools[0].name,
+                "tools_used": [t.name for t in selected_tools],
+                "num_tools": len(selected_tools),
+                "success": all_success,
                 "generated_at": datetime.utcnow().isoformat(),
                 "generator_version": "4.0",
             }

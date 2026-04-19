@@ -456,6 +456,7 @@ def simulate_tool(
     arguments: dict,
     seed: int = 42,
     filesystem: Optional[SimulatedFilesystem] = None,
+    error_rate: float = 0.0,
 ) -> ToolResult:
     """
     Simulate the output of a tool call for training data generation.
@@ -475,6 +476,8 @@ def simulate_tool(
         arguments: Tool arguments from the ToolCall
         seed: Random seed for reproducible generation
         filesystem: Optional SimulatedFilesystem instance for file operations
+        error_rate: Probability of returning an error result (0.0-1.0).
+                   0.15 (15%) is optimal per AgentErrorBench research.
 
     Returns:
         ToolResult with realistic output and appropriate exit code
@@ -485,6 +488,12 @@ def simulate_tool(
     """
     rng = random.Random(seed + hash(tool_name) % 10000)
     fs = filesystem or SimulatedFilesystem(seed=seed)
+
+    # AgentErrorBench: 15% error rate optimal for robust training
+    # Only apply error simulation to read operations (files must exist to succeed)
+    if error_rate > 0 and rng.random() < error_rate:
+        if tool_name in ("read_file", "list_files", "search_files", "bash", "python_exec", "node_exec"):
+            return _simulate_error(tool_name, arguments, rng)
 
     # Auto-generate call_id for result matching
     call_id = f"call_{hashlib.md5(f'{tool_name}{arguments}'.encode()).hexdigest()[:8]}"
