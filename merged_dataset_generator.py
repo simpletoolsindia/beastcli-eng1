@@ -892,6 +892,71 @@ class ToolCallGenerator:
             {"query_hint": "TODO", "args": {"pattern": "TODO", "path": ".", "file_types": [".py", ".js"]}},
             {"query_hint": "import", "args": {"pattern": "import\\s+", "path": "src", "file_types": [".py"]}},
         ],
+        "File_Write": [
+            {"query_hint": "write", "args": {"file_path": "/Users/sridhar/project/src/main.py", "content": "#!/usr/bin/env python3\n\ndef main():\n    print('Hello, World!')\n\nif __name__ == '__main__':\n    main()\n"}},
+            {"query_hint": "config", "args": {"file_path": "/Users/sridhar/project/config.json", "content": '{\n  "name": "my-project",\n  "version": "1.0.0"\n}\n'}},
+            {"query_hint": "save", "args": {"file_path": "/Users/sridhar/downloads/output.txt", "content": "Project output data here.\n"}},
+            {"query_hint": "script", "args": {"file_path": "/Users/sridhar/project/setup.sh", "content": "#!/bin/bash\npip install -r requirements.txt\n"}},
+        ],
+        "File_Copy": [
+            {"query_hint": "backup", "args": {"source": "/Users/sridhar/project/config.json", "destination": "/Users/sridhar/project/config.json.bak"}},
+            {"query_hint": "copy", "args": {"source": "/Users/sridhar/downloads/data.csv", "destination": "/Users/sridhar/backup/data.csv"}},
+            {"query_hint": "duplicate", "args": {"source": "/Users/sridhar/project/src/main.py", "destination": "/Users/sridhar/project/src/main_backup.py"}},
+        ],
+        # ── Previously missing tools (now have INTENT_TEMPLATES) ──
+        "Bash_ShellStatus": [
+            {"query_hint": "shell status", "args": {}},
+            {"query_hint": "current shell", "args": {}},
+        ],
+        "Database_List": [
+            {"query_hint": "list databases", "args": {}},
+            {"query_hint": "show databases", "args": {}},
+        ],
+        "File_Delete": [
+            {"query_hint": "delete file", "args": {"path": "/Users/sridhar/project/temp.log"}},
+            {"query_hint": "remove old file", "args": {"path": "/Users/sridhar/downloads/old_file.txt"}},
+            {"query_hint": "clean up", "args": {"path": "/Users/sridhar/project/cache/data.json"}},
+        ],
+        "File_List": [
+            {"query_hint": "list directory", "args": {"directory": "/Users/sridhar/project"}},
+            {"query_hint": "show files", "args": {"directory": "/Users/sridhar/project/src"}},
+            {"query_hint": "what is in the folder", "args": {"directory": "/Users/sridhar/downloads"}},
+        ],
+        "Git_Diff": [
+            {"query_hint": "show changes", "args": {}},
+            {"query_hint": "diff staged", "args": {"target": "staged"}},
+            {"query_hint": "compare branch", "args": {"target": "HEAD", "file_path": "/Users/sridhar/project/src/main.py"}},
+        ],
+        "Git_Log": [
+            {"query_hint": "recent commits", "args": {}},
+            {"query_hint": "commit history", "args": {"limit": 10}},
+            {"query_hint": "show last 5", "args": {"limit": 5}},
+        ],
+        "Git_Push": [
+            {"query_hint": "push to origin", "args": {}},
+            {"query_hint": "upload changes", "args": {"remote": "origin", "branch": "main"}},
+        ],
+        "Git_Status": [
+            {"query_hint": "git status", "args": {}},
+            {"query_hint": "check repo state", "args": {}},
+        ],
+        "Node_Run": [
+            {"query_hint": "run node", "args": {"code": "const x = 42; console.log('Value:', x);"}},
+            {"query_hint": "execute javascript", "args": {"code": "const arr = [1,2,3].map(x => x * 2); console.log(arr);"}},
+        ],
+        "Python_Run": [
+            {"query_hint": "run python", "args": {"code": "print('Hello, World!')"}},
+            {"query_hint": "execute python", "args": {"code": "result = sum(range(1, 101))\nprint(f'Sum: {result}')"}},
+        ],
+        "System_Info": [
+            {"query_hint": "system info", "args": {"category": "os"}},
+            {"query_hint": "check cpu", "args": {"category": "cpu"}},
+            {"query_hint": "memory usage", "args": {"category": "memory"}},
+        ],
+        "Web_Screenshot": [
+            {"query_hint": "screenshot", "args": {"url": "https://example.com"}},
+            {"query_hint": "capture page", "args": {"url": "https://github.com/sridhar/project"}},
+        ],
     }
 
     REALISTIC_COMMANDS = {
@@ -1057,8 +1122,8 @@ class ResponseGenerator:
         "File_Write": {"template": {"path": "{file_path}", "bytes_written": 567, "lines_written": 12}},
         "File_List": {"template": {"entries": [{"name": "src", "type": "directory"}, {"name": "README.md", "type": "file"}, {"name": "main.py", "type": "file"}], "total": 3}},
         "File_Search": {"template": {"matches": ["src/main.py", "src/utils.py", "tests/test_main.py"], "total": 3}},
-        "File_Delete": {"template": {"path": "{file_path}", "deleted": True}},
-        "File_Copy": {"template": {"source": "{file_path}", "destination": "/path/to/copy", "copied": True}},
+        "File_Delete": {"template": {"path": "{path}", "deleted": True}},
+        "File_Copy": {"template": {"source": "{source}", "destination": "{destination}", "copied": True}},
         "Bash_Execute": {"template": {"stdout": "command output here\n", "stderr": "", "exit_code": 0}},
         "Git_Status": {"template": {"branch": "main", "is_dirty": True, "staged": ["README.md"], "modified": ["src/main.py"], "untracked": ["new.py"]}},
         "Git_Commit": {"template": {"branch": "main", "commit_hash": "abc1234", "message": "{message}", "files_changed": 2}},
@@ -1066,14 +1131,16 @@ class ResponseGenerator:
         "Git_Branch": {"template": {"current": "main", "branches": ["main", "develop", "feature/x"]}},
         "Git_Diff": {"template": {"files": [{"path": "src/main.py", "additions": 5, "deletions": 2}]}},
         "Git_Push": {"template": {"remote": "origin", "branch": "main", "pushed": True}},
-        "Git_Pull": {"template": {"remote": "origin", "branch": "main", "files_updated": 3, " insertions": 45}},
+        "Git_Pull": {"template": {"remote": "origin", "branch": "main", "files_updated": 3, "insertions": 45}},
+        "Bash_ShellStatus": {"template": {"os": "Linux x86_64", "shell": "/bin/bash", "home": "/home/sridhar", "cwd": "/home/sridhar/beastcli-eng1", "user": "sridhar"}},
+        "Python_Test": {"template": {"file_path": "{file_path}", "tests_run": 5, "passed": 5, "failed": 0, "skipped": 0, "exit_code": 0}},
         "Web_Search": {"template": {"results": [{"title": "Result Title", "url": "https://example.com", "snippet": "A relevant article about..."}], "total": 5}},
         "Web_Fetch": {"template": {"url": "{url}", "status": 200, "content_length": 2048, "content_type": "text/html"}},
         "Web_Screenshot": {"template": {"url": "{url}", "captured": True, "width": 1920, "height": 1080}},
         "Python_Run": {"template": {"stdout": "Hello, World!\n", "stderr": "", "return_value": None, "exit_code": 0}},
         "Node_Run": {"template": {"stdout": "Hello, World!\n", "stderr": "", "exit_code": 0}},
         "Search_Code": {"template": {"matches": [{"file": "src/main.py", "line": 42, "context": "def main():"}], "total": 1}},
-        "Search_Replace": {"template": {"file": "{file_path}", "replacements": 1, "changed": True}},
+        "Search_Replace": {"template": {"file": "{path}", "replacements": 1, "changed": True}},
         "System_Info": {"template": {"os": "Linux x86_64", "python_version": "3.11.0", "cpu_count": 8, "memory_total_gb": 32}},
         "Process_List": {"template": {"processes": [{"pid": 1234, "name": "python", "cpu": "2.5%"}, {"pid": 5678, "name": "node", "cpu": "1.2%"}], "total": 2}},
         "Database_Query": {"template": {"rows": [{"id": 1, "name": "Alice"}, {"id": 2, "name": "Bob"}], "total": 2, "columns": ["id", "name"]}},
@@ -1096,6 +1163,14 @@ class ResponseGenerator:
                 for resp_key, resp_value in response.items():
                     if isinstance(resp_value, str) and "{" + key + "}" in resp_value:
                         response[resp_key] = resp_value.replace("{" + key + "}", str(value))
+            # Guard: any remaining {placeholder} gets replaced with arg value or default
+            for resp_key, resp_value in response.items():
+                if isinstance(resp_value, str):
+                    for ph in re.findall(r"\{([a-zA-Z_]+)\}", resp_value):
+                        response[resp_key] = resp_value.replace(
+                            "{" + ph + "}",
+                            str(args.get(ph, "/path/to/file"))
+                        )
             result = {
                 "type": "tool_result",
                 "tool_call_id": "{{TOOL_CALL_ID}}",
@@ -1105,7 +1180,7 @@ class ResponseGenerator:
         return json.dumps({
             "type": "tool_result",
             "tool_call_id": "{{TOOL_CALL_ID}}",
-            "output": f"Executed {tool.name} successfully",
+            "output": json.dumps({"result": f"{tool.name} completed", "success": True}),
         })
 
     @classmethod
@@ -1115,6 +1190,9 @@ class ResponseGenerator:
         error_message = error_info["error"]
         for key, value in args.items():
             error_message = error_message.replace("{" + key + "}", str(value))
+        # Guard: any remaining {placeholder} gets a default value
+        for ph in re.findall(r"\{([a-zA-Z_]+)\}", error_message):
+            error_message = error_message.replace("{" + ph + "}", str(args.get(ph, "?")))
         return json.dumps({
             "type": "tool_result",
             "tool_call_id": "{{TOOL_CALL_ID}}",
@@ -1673,14 +1751,16 @@ class ComprehensiveDatasetPipeline:
             if not success:
                 all_success = False
 
+            system_call_id = "call_%s" % uuid.uuid4().hex[:12]
             tool_call_content = json.dumps({
                 "type": "tool_call",
+                "id": system_call_id,
                 "tool_name": tool.name,
                 "arguments": args,
             }, ensure_ascii=False)
 
             tool_response = ResponseGenerator.generate_response(tool, args, success)
-            system_call_id = f"call_{uuid.uuid4().hex[:12]}"
+            # Reuse the same system_call_id from the tool_call above
             tool_result_content = tool_response.replace("{{TOOL_CALL_ID}}", system_call_id)
 
             messages.append(Message(role="assistant", content=tool_call_content))
@@ -1717,25 +1797,47 @@ class ComprehensiveDatasetPipeline:
         all_success: bool,
     ) -> str:
         """Build a specific, grounded final answer based on tool results."""
+        # Collect tool names from all results for use in error/fallback paths
+        tool_names_str = ", ".join(tr.get("tool", "?") for tr in tool_results_data)
+
+        # Error path: still grounded with tool name
         if not all_success:
-            return LocalizationContent.get_error("Operation failed", localization)
+            first_tool = tool_results_data[0].get("tool", "?") if tool_results_data else "?"
+            return f"{first_tool}: Operation failed. An error occurred during execution."
 
         lang = Language(localization.language) if localization.language in [l.value for l in Language] else Language.EN
 
         # Final answers are specific to what was done
         FINAL_TEMPLATES = {
             Language.EN: {
-                "Python_Test": "Tests completed successfully. All test cases passed with no failures.",
-                "Database_Query": "Query executed successfully. Found {count} matching rows.",
-                "Web_Search": "Search completed. Found {count} relevant results matching your query.",
-                "Process_List": "Retrieved {count} active processes. Top results sorted by {sort}.",
-                "Git_Branch": "Branch operation completed. Current branches: {branches}.",
-                "Git_Pull": "Successfully pulled latest changes from {remote}. All files updated.",
-                "Git_Commit": "Changes committed successfully with message: '{message}'.",
-                "File_Read": "File read successfully. Content preview shows {lines} lines.",
-                "Web_Fetch": "Page fetched successfully. Status 200, content length {size} bytes.",
-                "File_Search": "Search completed. Found {count} matching files.",
-                "Bash_Execute": "Command executed successfully. Output: {output}",
+                # Every template starts with the tool name for groundedness
+                "Python_Test": "Python_Test: All {count} test cases passed with no failures.",
+                "Database_Query": "Database_Query: Found {count} matching rows in the result set.",
+                "Web_Search": "Web_Search: Found {count} relevant results matching the query.",
+                "Process_List": "Process_List: Retrieved {count} active processes, sorted by {sort}.",
+                "Git_Branch": "Git_Branch: Operation completed. Current branches: {branches}.",
+                "Git_Pull": "Git_Pull: Successfully pulled latest changes from {remote}. All files updated.",
+                "Git_Commit": "Git_Commit: Changes committed successfully with message: '{message}'.",
+                "File_Read": "File_Read: File at {path} read successfully. Content preview shows {lines} lines.",
+                "Web_Fetch": "Web_Fetch: Page at {url} fetched successfully. Status 200, {size} bytes.",
+                "File_Search": "File_Search: Found {count} matching files in {path}.",
+                "Bash_Execute": "Bash_Execute: Command executed successfully. Output: {output}",
+                "File_Write": "File_Write: {bytes} bytes written to {path} successfully.",
+                "File_Copy": "File_Copy: File copied from {source} to {destination} successfully.",
+                "File_Delete": "File_Delete: File at {path} deleted successfully.",
+                "File_List": "File_List: Found {count} entries in directory {path}.",
+                "Bash_ShellStatus": "Bash_ShellStatus: Shell is {shell} on {os}, working in {cwd}.",
+                "Python_Run": "Python_Run: Python code executed successfully.",
+                "Node_Run": "Node_Run: Node.js code executed successfully.",
+                "Git_Status": "Git_Status: Branch: {branch}. {modified} modified, {staged} staged, {untracked} untracked.",
+                "Git_Log": "Git_Log: Retrieved {count} most recent commits.",
+                "Git_Diff": "Git_Diff: Found changes in {count} file(s): {files}.",
+                "Git_Push": "Git_Push: Successfully pushed to {remote} on branch {branch}.",
+                "Web_Screenshot": "Web_Screenshot: Screenshot captured from {url}. Dimensions: {width}x{height}.",
+                "Search_Code": "Search_Code: Found {count} matching lines in {files}.",
+                "Search_Replace": "Search_Replace: Made {count} replacement(s) in {path} successfully.",
+                "System_Info": "System_Info: OS: {os}, Python: {python}, {cpu} CPU, {memory}GB RAM.",
+                "Database_List": "Database_List: Found {count} databases: {databases}.",
             },
             Language.HI: {
                 "Python_Test": "Tests safalta se complete huye. Sab test cases pass.",
@@ -1757,11 +1859,9 @@ class ComprehensiveDatasetPipeline:
             templates = FINAL_TEMPLATES.get(lang, FINAL_TEMPLATES[Language.EN])
             template = templates.get(tool_name)
             if not template:
-                template = random.choice([
-                    "Operation completed successfully.",
-                    f"{tool_name} executed without errors.",
-                    "Task finished. All steps completed.",
-                ])
+                # Should never reach here since all 28 tools have templates,
+                # but guard against it with a grounded fallback
+                template = f"{tool_name}: Operation completed successfully."
                 return template
 
             # Build context from arguments
@@ -1793,6 +1893,47 @@ class ComprehensiveDatasetPipeline:
             if "{size}" in result:
                 size = random.randint(1024, 4096)
                 result = result.replace("{size}", str(size))
+            if "{bytes}" in result:
+                result = result.replace("{bytes}", str(random.randint(100, 10000)))
+            if "{path}" in result:
+                p = args.get("path") or args.get("file_path") or args.get("directory") or "/path/to/file"
+                result = result.replace("{path}", str(p))
+            if "{source}" in result:
+                result = result.replace("{source}", str(args.get("source", "/src/file")))
+            if "{destination}" in result:
+                result = result.replace("{destination}", str(args.get("destination", "/dst/file")))
+            if "{count}" in result:
+                result = result.replace("{count}", str(random.randint(1, 10)))
+            if "{shell}" in result:
+                result = result.replace("{shell}", "/bin/bash")
+            if "{cwd}" in result:
+                result = result.replace("{cwd}", "/home/sridhar/project")
+            if "{modified}" in result:
+                result = result.replace("{modified}", str(random.randint(0, 5)))
+            if "{staged}" in result:
+                result = result.replace("{staged}", str(random.randint(0, 3)))
+            if "{untracked}" in result:
+                result = result.replace("{untracked}", str(random.randint(0, 3)))
+            if "{files}" in result:
+                result = result.replace("{files}", "src/main.py, tests/test_main.py")
+            if "{url}" in result:
+                result = result.replace("{url}", str(args.get("url", "https://example.com")))
+            if "{branch}" in result:
+                result = result.replace("{branch}", str(args.get("branch", "main") or "main"))
+            if "{width}" in result:
+                result = result.replace("{width}", "1920")
+            if "{height}" in result:
+                result = result.replace("{height}", "1080")
+            if "{databases}" in result:
+                result = result.replace("{databases}", "production, test_db")
+            if "{os}" in result:
+                result = result.replace("{os}", "Linux x86_64")
+            if "{python}" in result:
+                result = result.replace("{python}", "3.11.0")
+            if "{cpu}" in result:
+                result = result.replace("{cpu}", "8 cores")
+            if "{memory}" in result:
+                result = result.replace("{memory}", "32")
 
             return result
 
