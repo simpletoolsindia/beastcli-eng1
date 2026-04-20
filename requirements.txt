@@ -1,2 +1,4 @@
 # BeastCLI ENG1 Dataset Pipeline
 # Python >= 3.10
+streamlit>=1.37.0
+pandas>=2.2.0

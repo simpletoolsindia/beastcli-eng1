@@ -4,10 +4,10 @@ regenerate_dataset.py — Regenerate Beast CLI datasets with correct schema and 
 
 Fixes applied:
 1. Correct schema: tool_result (type field), tool_call (JSON string content)
-2. Multi-tool samples (2-3 tools) for reduced structural duplication
-3. All 26 tools covered with diverse query templates
-4. 12 languages, 4 tones, 3 formalities
-5. 4 difficulty levels with ToolACE distribution
+2. Single-intent samples to preserve request/tool alignment
+3. All 27 tools covered with diverse query templates
+4. English-only production path until real multilingual text generation exists
+5. 4 tones, 3 formalities, and 4 difficulty levels with ToolACE distribution
 6. 15% error rate (AgentErrorBench optimal)
 7. Strict validation before writing
 
@@ -43,7 +43,10 @@ def generate_diverse_dataset(
     random.seed(seed)
     pipe = ComprehensiveDatasetPipeline(seed=seed)
 
-    languages = [l.value for l in Language]  # 12 languages
+    # Production gate: do not emit fake multilingual samples. The generator
+    # currently varies tone/formality well, but the prompt/answer text itself
+    # is authored in English templates only.
+    languages = [Language.EN.value]
     tones = [t.value for t in Tone]          # 4 tones
     formalities = [f.value for f in FormalityLevel]  # 3 formalities
 

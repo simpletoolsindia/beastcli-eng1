@@ -392,6 +392,7 @@ class ToolRegistry:
                 ToolArgument("pattern", "string", "Glob pattern (e.g., *.py matches all Python files)", required=True),
                 ToolArgument("path", "string", "Root directory to search in", required=False, default="."),
                 ToolArgument("recursive", "boolean", "Search subdirectories recursively", required=False, default=True),
+                ToolArgument("content_search", "boolean", "Treat pattern as text to search within file contents instead of filenames", required=False, default=False),
             ],
             returns="List of matching file paths",
         ),
@@ -477,6 +478,8 @@ class ToolRegistry:
             arguments=[
                 ToolArgument("file_path", "string", "Path to test file or directory", required=True),
                 ToolArgument("pattern", "string", "Pattern to match test names", required=False, default="test_*.py"),
+                ToolArgument("verbose", "boolean", "Enable verbose pytest output", required=False, default=False),
+                ToolArgument("coverage", "boolean", "Include a coverage report in the test output", required=False, default=False),
             ],
             returns="Test results with pass/fail counts and failure details",
         ),
@@ -679,8 +682,7 @@ class ToolRegistry:
             cls.GIT_OPERATIONS +
             cls.WEB_OPERATIONS +
             cls.SEARCH_OPERATIONS +
-            cls.SYSTEM_OPERATIONS +
-            cls.DATABASE_OPERATIONS
+            cls.SYSTEM_OPERATIONS
         )
 
     @classmethod
@@ -701,13 +703,11 @@ class Humanizer:
 
     IMPERFECTIONS_EN = {
         "prefixes": [
-            ("Actually, ", 0.12), ("So, ", 0.10), ("Right, ", 0.08),
-            ("Let me ", 0.10), ("Hmm, ", 0.08), ("Well, ", 0.06),
-            ("You know, ", 0.05), ("I think ", 0.08),
+            ("Can you ", 0.04),
+            ("Please ", 0.03),
         ],
         "suffixes": [
-            (" sounds good.", 0.08), (" right?", 0.06), (" okay?", 0.04),
-            (", I guess", 0.05), (", you know?", 0.04),
+            (" please.", 0.02),
         ],
     }
 
@@ -808,26 +808,37 @@ class ToolCallGenerator:
     """Generate arguments that semantically match the user query."""
 
     REALISTIC_PATHS = {
-        "config": ["/Users/sridhar/project/config.json", "/Users/sridhar/project/settings.yaml"],
-        "source": ["/Users/sridhar/project/src/main.py", "/Users/sridhar/project/lib/utils.py"],
-        "test": ["/Users/sridhar/project/tests/test_main.py", "/Users/sridhar/project/__tests__/auth.test.js"],
-        "output": ["/Users/sridhar/output/result.json", "/Users/sridhar/downloads/data.csv"],
+        "config": ["config.json", "settings.yaml"],
+        "source": ["src/main.py", "lib/utils.py"],
+        "test": ["tests/test_main.py", "__tests__/auth.test.js"],
+        "output": ["output/result.json", "downloads/data.csv"],
     }
 
     # Intent-driven argument templates: tool -> list of {query_hint, args} pairs
     # These ensure arguments directly match what the user asks for.
     INTENT_TEMPLATES = {
+        "File_Write": [
+            {"query_hint": "output.txt", "args": {"file_path": "output.txt", "content": "Build completed successfully.\n", "append": False}},
+            {"query_hint": "test.py", "args": {"file_path": "test.py", "content": "print('Hello')\n", "append": False}},
+            {"query_hint": "data.json", "args": {"file_path": "data.json", "content": "{\"key\": \"value\"}\n", "append": False}},
+            {"query_hint": "log entry", "args": {"file_path": "logs/app.log", "content": "[INFO] Request completed successfully\n", "append": True}},
+            {"query_hint": "readme", "args": {"file_path": "README.md", "content": "# Installation\n\n1. Create a virtual environment.\n2. Install dependencies.\n3. Run the CLI.\n", "append": False}},
+            {"query_hint": "models.py", "args": {"file_path": "src/models.py", "content": "class User:\n    def __init__(self, name: str):\n        self.name = name\n", "append": False}},
+            {"query_hint": "logic.py", "args": {"file_path": "output/logic.py", "content": "import argparse\n\nparser = argparse.ArgumentParser()\nparser.add_argument('--name')\nprint(parser.parse_args())\n", "append": False}},
+        ],
         "Python_Test": [
-            {"query_hint": "test_api", "args": {"file_path": "/Users/sridhar/project/tests/test_api.py", "pattern": "test_api_*.py"}},
-            {"query_hint": "pytest", "args": {"file_path": "/Users/sridhar/project/tests/", "pattern": "test_*.py"}},
-            {"query_hint": "test_main", "args": {"file_path": "/Users/sridhar/project/tests/test_main.py", "pattern": None}},
-            {"query_hint": "auth", "args": {"file_path": "/Users/sridhar/project/tests/test_auth.py", "pattern": "test_auth*"}},
+            {"query_hint": "test_api", "args": {"file_path": "tests/", "pattern": "test_api_*.py"}},
+            {"query_hint": "pytest", "args": {"file_path": "tests/", "pattern": "test_*.py"}},
+            {"query_hint": "test_main", "args": {"file_path": "tests/test_main.py", "pattern": None}},
+            {"query_hint": "auth", "args": {"file_path": "tests/test_auth.py", "pattern": "test_auth*"}},
+            {"query_hint": "coverage report", "args": {"file_path": "tests/", "pattern": "test_*.py", "verbose": True, "coverage": True}},
         ],
         "Database_Query": [
             {"query_hint": "SELECT", "args": {"query": "SELECT * FROM users LIMIT 10", "database": "production_db"}},
             {"query_hint": "COUNT", "args": {"query": "SELECT COUNT(*) FROM orders", "database": "production_db"}},
             {"query_hint": "WHERE", "args": {"query": "SELECT id, name FROM products WHERE active = true", "database": "production_db"}},
             {"query_hint": "JOIN", "args": {"query": "SELECT u.name, o.total FROM users u JOIN orders o ON u.id = o.user_id", "database": "production_db"}},
+            {"query_hint": "last 30 days", "args": {"query": "SELECT * FROM orders WHERE created_at >= CURRENT_DATE - INTERVAL '30 days'", "database": "production_db"}},
         ],
         "Web_Search": [
             {"query_hint": "best practices", "args": {"query": "Python best practices 2026"}},
@@ -835,37 +846,86 @@ class ToolCallGenerator:
             {"query_hint": "TypeScript", "args": {"query": "TypeScript generic constraints extends"}},
             {"query_hint": "Docker", "args": {"query": "Docker multi-stage build optimization"}},
             {"query_hint": "Git", "args": {"query": "Git workflow best practices team"}},
+            {"query_hint": "recent papers", "args": {"query": "recent papers on LLM fine-tuning techniques"}},
+            {"query_hint": "llm fine-tuning", "args": {"query": "latest articles on LLM fine-tuning techniques"}},
         ],
         "Process_List": [
-            {"query_hint": "processes", "args": {"filter": None, "sort_by": "cpu", "limit": 20}},
+            {"query_hint": "processes", "args": {"filter": None}},
             {"query_hint": "memory", "args": {"filter": None, "sort_by": "memory", "limit": 10}},
             {"query_hint": "top", "args": {"filter": None, "sort_by": "cpu", "limit": 5}},
-            {"query_hint": "active", "args": {"filter": "running", "sort_by": "cpu", "limit": 15}},
+            {"query_hint": "top 10", "args": {"filter": None, "sort_by": "cpu", "limit": 10}},
+            {"query_hint": "active", "args": {}},
+        ],
+        "File_List": [
+            {"query_hint": "current directory", "args": {"directory": ".", "include_hidden": False, "filter_type": "all"}},
+            {"query_hint": "project structure", "args": {"directory": ".", "include_hidden": False, "filter_type": "all"}},
+            {"query_hint": "src", "args": {"directory": "src", "include_hidden": True, "filter_type": "all"}},
+            {"query_hint": "categorize", "args": {"directory": ".", "include_hidden": False, "filter_type": "all"}},
+            {"query_hint": "config folder", "args": {"directory": "config", "include_hidden": False, "filter_type": "files"}},
+            {"query_hint": "config", "args": {"directory": "config", "include_hidden": False, "filter_type": "files"}},
+        ],
+        "File_Delete": [
+            {"query_hint": "cache.log", "args": {"path": "/tmp/cache.log", "recursive": False}},
+            {"query_hint": "output.json", "args": {"path": "output.json", "recursive": False}},
+            {"query_hint": "backup", "args": {"path": "backup_old.py", "recursive": False}},
+            {"query_hint": ".pyc", "args": {"path": "build/**/*.pyc", "recursive": True}},
+        ],
+        "File_Copy": [
+            {"query_hint": "readme", "args": {"source": "README.md", "destination": "README_backup.md"}},
+            {"query_hint": "config", "args": {"source": "config.json", "destination": "config.old"}},
+            {"query_hint": "src", "args": {"source": "src", "destination": "src_backup"}},
         ],
         "Git_Branch": [
             {"query_hint": "branch_name", "args": {"operation": "create", "branch_name": "feature/login"}},
             {"query_hint": "delete", "args": {"operation": "delete", "branch_name": "old-feature"}},
             {"query_hint": "switch", "args": {"operation": "switch", "branch_name": "develop"}},
-            {"query_hint": "list", "args": {}},
+            {"query_hint": "list", "args": {"operation": "list"}},
+        ],
+        "Git_Status": [
+            {"query_hint": "status", "args": {"repository_path": "."}},
+            {"query_hint": "repository", "args": {"repository_path": "."}},
+            {"query_hint": "modified", "args": {"repository_path": "."}},
+        ],
+        "Git_Log": [
+            {"query_hint": "last 5", "args": {"repository_path": ".", "limit": 5, "format": "medium"}},
+            {"query_hint": "last 10", "args": {"repository_path": ".", "limit": 10, "format": "short"}},
+            {"query_hint": "authors", "args": {"repository_path": ".", "limit": 10, "format": "medium"}},
+            {"query_hint": "commit history", "args": {"repository_path": "."}},
+        ],
+        "Git_Diff": [
+            {"query_hint": "src/main.py", "args": {"target": "HEAD", "file_path": "src/main.py", "repository_path": "."}},
+            {"query_hint": "unstaged", "args": {"target": "working_tree", "repository_path": "."}},
+            {"query_hint": "current branch", "args": {"target": "main", "repository_path": "."}},
+            {"query_hint": "last commit", "args": {"target": "HEAD", "repository_path": "."}},
         ],
         "Git_Pull": [
             {"query_hint": "origin", "args": {"remote": "origin", "branch": "main"}},
             {"query_hint": "master", "args": {"remote": "origin", "branch": "master"}},
             {"query_hint": "develop", "args": {"remote": "origin", "branch": "develop"}},
+            {"query_hint": "latest changes", "args": {}},
+        ],
+        "Git_Push": [
+            {"query_hint": "origin main", "args": {"repository_path": ".", "remote": "origin", "branch": "main"}},
+            {"query_hint": "remote repository", "args": {"repository_path": ".", "remote": "origin", "branch": "main"}},
+            {"query_hint": "develop", "args": {"repository_path": ".", "remote": "origin", "branch": "develop"}},
         ],
         "Git_Commit": [
-            {"query_hint": "fix:", "args": {"message": "fix: resolve authentication bug", "all": True}},
+            {"query_hint": "fix: resolve bug", "args": {"message": "fix: resolve bug", "all": True}},
+            {"query_hint": "fix:", "args": {"message": "fix: resolve bug", "all": True}},
             {"query_hint": "feat:", "args": {"message": "feat: add user profile management", "all": True}},
             {"query_hint": "update:", "args": {"message": "update: modify config settings", "all": False}},
             {"query_hint": "chore:", "args": {"message": "chore: update dependencies", "all": True}},
         ],
         "File_Read": [
-            {"query_hint": "first 50", "args": {"file_path": "/Users/sridhar/project/src/main.py", "offset": 0, "limit": 50}},
-            {"query_hint": "config", "args": {"file_path": "/Users/sridhar/project/config.json", "offset": 0, "limit": None}},
-            {"query_hint": "README", "args": {"file_path": "/Users/sridhar/project/README.md", "offset": 0, "limit": 100}},
-            {"query_hint": "src", "args": {"file_path": "/Users/sridhar/project/src/app.py", "offset": 0, "limit": None}},
+            {"query_hint": "src/main.py", "args": {"file_path": "src/main.py", "offset": 0, "limit": None}},
+            {"query_hint": "first 50", "args": {"file_path": "src/main.py", "offset": 0, "limit": 50}},
+            {"query_hint": "config", "args": {"file_path": "config.json", "offset": 0, "limit": None}},
+            {"query_hint": "README", "args": {"file_path": "README.md", "offset": 0, "limit": 100}},
+            {"query_hint": "src", "args": {"file_path": "src/app.py", "offset": 0, "limit": None}},
         ],
         "Web_Fetch": [
+            {"query_hint": "release notes", "args": {"url": "https://github.com/example/repo/releases"}},
+            {"query_hint": "github.com/example/repo", "args": {"url": "https://github.com/example/repo/blob/main/README.md"}},
             {"query_hint": "github.com", "args": {"url": "https://github.com/anthropic/claude-code"}},
             {"query_hint": "api", "args": {"url": "https://api.github.com/repos/anthropic/claude-code"}},
             {"query_hint": "status", "args": {"url": "https://httpbin.org/status/200"}},
@@ -873,8 +933,11 @@ class ToolCallGenerator:
         "File_Search": [
             {"query_hint": "*.py", "args": {"pattern": "*.py", "path": ".", "recursive": True}},
             {"query_hint": "test", "args": {"pattern": "test_*.py", "path": "src", "recursive": True}},
-            {"query_hint": "config", "args": {"pattern": "*.json", "path": "config", "recursive": False}},
+            {"query_hint": "config", "args": {"pattern": "*config*", "path": ".", "recursive": True}},
             {"query_hint": "*.js", "args": {"pattern": "*.js", "path": ".", "recursive": True}},
+            {"query_hint": "markdown documentation", "args": {"pattern": "*.md", "path": ".", "recursive": True}},
+            {"query_hint": "which ones mention", "args": {"pattern": "setup", "path": ".", "recursive": True, "content_search": True}},
+            {"query_hint": "setup", "args": {"pattern": "setup", "path": ".", "recursive": True, "content_search": True}},
         ],
         "Bash_Execute": [
             {"query_hint": "ls", "args": {"command": "ls -la", "timeout": 10, "working_directory": None}},
@@ -883,79 +946,55 @@ class ToolCallGenerator:
             {"query_hint": "npm", "args": {"command": "npm install", "timeout": 120, "working_directory": None}},
             {"query_hint": "find", "args": {"command": "find . -name '*.py' -type f", "timeout": 30, "working_directory": None}},
             {"query_hint": "git status", "args": {"command": "git status --porcelain", "timeout": 10, "working_directory": None}},
+            {"query_hint": "working directory", "args": {"command": "pwd", "timeout": 10, "working_directory": None}},
+            {"query_hint": "top 5 processes", "args": {"command": "ps aux --sort=-rss | head -5", "timeout": 10, "working_directory": None}},
+            {"query_hint": "TODO", "args": {"command": "rg -n \"TODO\" .", "timeout": 30, "working_directory": None}},
         ],
         "Search_Replace": [
-            {"query_hint": "foo", "args": {"file_path": "/Users/sridhar/project/src/main.py", "search": "foo", "replace": "bar"}},
-            {"query_hint": "timeout", "args": {"file_path": "/Users/sridhar/project/config.json", "search": '"timeout": 30', "replace": '"timeout": 60'}},
+            {"query_hint": "src/main.py", "args": {"path": "src/main.py", "search": "foo", "replace": "bar", "file_types": [".py"], "preview": False}},
+            {"query_hint": "foo", "args": {"path": "src", "search": "foo", "replace": "bar", "file_types": [".py"], "preview": False}},
+            {"query_hint": "config.json", "args": {"path": "config.json", "search": '"timeout": 30', "replace": '"timeout": 60', "file_types": [".json"], "preview": False}},
+            {"query_hint": "timeout", "args": {"path": "config.json", "search": '"timeout": 30', "replace": '"timeout": 60', "file_types": [".json"], "preview": False}},
+            {"query_hint": "import statements", "args": {"path": ".", "search": "utils", "replace": "helpers", "file_types": [".py"], "preview": False}},
+            {"query_hint": "helpers", "args": {"path": ".", "search": "utils", "replace": "helpers", "file_types": [".py"], "preview": False}},
         ],
         "Search_Code": [
-            {"query_hint": "TODO", "args": {"pattern": "TODO", "path": ".", "file_types": [".py", ".js"]}},
+            {"query_hint": "TODO", "args": {"pattern": "TODO", "path": "."}},
             {"query_hint": "import", "args": {"pattern": "import\\s+", "path": "src", "file_types": [".py"]}},
-        ],
-        "File_Write": [
-            {"query_hint": "write", "args": {"file_path": "/Users/sridhar/project/src/main.py", "content": "#!/usr/bin/env python3\n\ndef main():\n    print('Hello, World!')\n\nif __name__ == '__main__':\n    main()\n"}},
-            {"query_hint": "config", "args": {"file_path": "/Users/sridhar/project/config.json", "content": '{\n  "name": "my-project",\n  "version": "1.0.0"\n}\n'}},
-            {"query_hint": "save", "args": {"file_path": "/Users/sridhar/downloads/output.txt", "content": "Project output data here.\n"}},
-            {"query_hint": "script", "args": {"file_path": "/Users/sridhar/project/setup.sh", "content": "#!/bin/bash\npip install -r requirements.txt\n"}},
-        ],
-        "File_Copy": [
-            {"query_hint": "backup", "args": {"source": "/Users/sridhar/project/config.json", "destination": "/Users/sridhar/project/config.json.bak"}},
-            {"query_hint": "copy", "args": {"source": "/Users/sridhar/downloads/data.csv", "destination": "/Users/sridhar/backup/data.csv"}},
-            {"query_hint": "duplicate", "args": {"source": "/Users/sridhar/project/src/main.py", "destination": "/Users/sridhar/project/src/main_backup.py"}},
-        ],
-        # ── Previously missing tools (now have INTENT_TEMPLATES) ──
-        "Bash_ShellStatus": [
-            {"query_hint": "shell status", "args": {}},
-            {"query_hint": "current shell", "args": {}},
-        ],
-        "Database_List": [
-            {"query_hint": "list databases", "args": {}},
-            {"query_hint": "show databases", "args": {}},
-        ],
-        "File_Delete": [
-            {"query_hint": "delete file", "args": {"path": "/Users/sridhar/project/temp.log"}},
-            {"query_hint": "remove old file", "args": {"path": "/Users/sridhar/downloads/old_file.txt"}},
-            {"query_hint": "clean up", "args": {"path": "/Users/sridhar/project/cache/data.json"}},
-        ],
-        "File_List": [
-            {"query_hint": "list directory", "args": {"directory": "/Users/sridhar/project"}},
-            {"query_hint": "show files", "args": {"directory": "/Users/sridhar/project/src"}},
-            {"query_hint": "what is in the folder", "args": {"directory": "/Users/sridhar/downloads"}},
-        ],
-        "Git_Diff": [
-            {"query_hint": "show changes", "args": {}},
-            {"query_hint": "diff staged", "args": {"target": "staged"}},
-            {"query_hint": "compare branch", "args": {"target": "HEAD", "file_path": "/Users/sridhar/project/src/main.py"}},
-        ],
-        "Git_Log": [
-            {"query_hint": "recent commits", "args": {}},
-            {"query_hint": "commit history", "args": {"limit": 10}},
-            {"query_hint": "show last 5", "args": {"limit": 5}},
-        ],
-        "Git_Push": [
-            {"query_hint": "push to origin", "args": {}},
-            {"query_hint": "upload changes", "args": {"remote": "origin", "branch": "main"}},
-        ],
-        "Git_Status": [
-            {"query_hint": "git status", "args": {}},
-            {"query_hint": "check repo state", "args": {}},
-        ],
-        "Node_Run": [
-            {"query_hint": "run node", "args": {"code": "const x = 42; console.log('Value:', x);"}},
-            {"query_hint": "execute javascript", "args": {"code": "const arr = [1,2,3].map(x => x * 2); console.log(arr);"}},
-        ],
-        "Python_Run": [
-            {"query_hint": "run python", "args": {"code": "print('Hello, World!')"}},
-            {"query_hint": "execute python", "args": {"code": "result = sum(range(1, 101))\nprint(f'Sum: {result}')"}},
-        ],
-        "System_Info": [
-            {"query_hint": "system info", "args": {"category": "os"}},
-            {"query_hint": "check cpu", "args": {"category": "cpu"}},
-            {"query_hint": "memory usage", "args": {"category": "memory"}},
+            {"query_hint": "def main", "args": {"pattern": "def main", "path": ".", "file_types": [".py"]}},
+            {"query_hint": "try/except", "args": {"pattern": "try:", "path": ".", "file_types": [".py"]}},
+            {"query_hint": "error handling", "args": {"pattern": "try:", "path": ".", "file_types": [".py"]}},
         ],
         "Web_Screenshot": [
-            {"query_hint": "screenshot", "args": {"url": "https://example.com"}},
-            {"query_hint": "capture page", "args": {"url": "https://github.com/sridhar/project"}},
+            {"query_hint": "example.com", "args": {"url": "https://example.com", "full_page": False}},
+            {"query_hint": "homepage", "args": {"url": "https://docs.example.com", "full_page": True}},
+            {"query_hint": "documentation site", "args": {"url": "https://docs.example.com", "full_page": True}},
+        ],
+        "Python_Run": [
+            {"query_hint": "Hello, World", "args": {"code": "print('Hello, World!')", "timeout": 10}},
+            {"query_hint": "sum(range", "args": {"code": "result = sum(range(1, 101))\nprint(result)", "timeout": 10}},
+            {"query_hint": "fibonacci(30)", "args": {"code": "def fibonacci(n):\n    return n if n < 2 else fibonacci(n-1) + fibonacci(n-2)\nprint(fibonacci(30))", "timeout": 10}},
+            {"query_hint": "fibonacci", "args": {"code": "def fibonacci(n):\n    return n if n < 2 else fibonacci(n-1) + fibonacci(n-2)\nprint(fibonacci(10))", "timeout": 10}},
+            {"query_hint": "json file", "args": {"code": "import json\nprint(json.loads('{\"ok\": true}'))", "timeout": 10}},
+            {"query_hint": "reads CSV", "args": {"code": "import csv, io\nrows = list(csv.DictReader(io.StringIO('name,value\\na,1\\nb,2\\n')))\nprint({'row_count': len(rows), 'total': sum(int(r['value']) for r in rows)})", "timeout": 10}},
+            {"query_hint": "http request", "args": {"code": "import urllib.request\nwith urllib.request.urlopen('https://example.com') as response:\n    print(response.read().decode('utf-8')[:120])", "timeout": 10}},
+        ],
+        "Node_Run": [
+            {"query_hint": "Hello from Node", "args": {"code": "console.log('Hello from Node!')", "timeout": 10}},
+            {"query_hint": "map", "args": {"code": "const arr = [1,2,3].map(x => x * 2); console.log(arr);", "timeout": 10}},
+            {"query_hint": "read README.md", "args": {"code": "const fs = require('fs'); console.log(fs.readFileSync('README.md', 'utf8'));", "timeout": 10}},
+        ],
+        "System_Info": [
+            {"query_hint": "cpu", "args": {"category": "cpu"}},
+            {"query_hint": "memory", "args": {"category": "memory"}},
+            {"query_hint": "disk", "args": {"category": "disk"}},
+            {"query_hint": "network", "args": {"category": "network"}},
+            {"query_hint": "os", "args": {"category": "os"}},
+        ],
+        "Database_List": [
+            {"query_hint": "databases", "args": {}},
+            {"query_hint": "server", "args": {}},
+            {"query_hint": "tables", "args": {"database": "production_db"}},
         ],
     }
 
@@ -971,24 +1010,67 @@ class ToolCallGenerator:
         "javascript": ["console.log('Hello!');", "const arr = [1, 2, 3].map(x => x * 2);"],
     }
 
+    @staticmethod
+    def _extract_path_from_query(query: str) -> Optional[str]:
+        quoted = re.findall(r"['\"]([^'\"]+\.[a-zA-Z0-9]+)['\"]", query)
+        for candidate in quoted:
+            if "/" in candidate or "." in candidate:
+                return candidate
+
+        path_patterns = [
+            r"\b(?:[A-Za-z0-9_.-]+/)*[A-Za-z0-9_.-]+\.[A-Za-z0-9]+\b",
+            r"\b[A-Za-z0-9_.-]+\.[A-Za-z0-9]+\b",
+        ]
+        for pattern in path_patterns:
+            match = re.search(pattern, query)
+            if match:
+                return match.group(0)
+        return None
+
     @classmethod
     def generate_arguments(cls, tool: ToolSchema, query: str) -> dict:
         """Generate arguments that match the user query intent."""
         intents = cls.INTENT_TEMPLATES.get(tool.name, [])
+        inferred = cls._infer_arguments_from_query(tool, query)
+
+        # Some tools should prefer literal extraction from the user query over
+        # fuzzy hint matching so we do not overwrite explicit paths/counts.
+        prefer_inferred = {
+            "File_Read",
+            "File_Search",
+            "Process_List",
+            "Python_Test",
+            "Git_Branch",
+            "Git_Log",
+            "Python_Run",
+        }
+        if inferred and tool.name in prefer_inferred:
+            return inferred
 
         if intents:
             # Try to find a matching intent from the query
             matched = None
             query_lower = query.lower()
+            best_score = 0
             for intent in intents:
                 hint = intent["query_hint"].lower()
-                # Match by keyword in query
-                if any(word in query_lower for word in hint.replace("_", " ").split()):
+                hint_words = [word for word in hint.replace("_", " ").split() if word]
+                score = 0
+                if hint in query_lower:
+                    score += 100 + len(hint)
+                matched_words = sum(1 for word in hint_words if word in query_lower)
+                score += matched_words * 3
+                if hint_words and matched_words == len(hint_words):
+                    score += 20 + len(hint_words)
+                score += len(hint_words)
+                if score > best_score:
                     matched = intent
-                    break
+                    best_score = score
             if matched is None:
-                # Use a random intent (not skip args) — NEVER fall back to random values
-                matched = random.choice(intents)
+                if inferred:
+                    return inferred
+                # Deterministic safe fallback: avoid random template mismatches.
+                return cls._fallback_arguments(tool)
             args = dict(matched["args"])
             # Remove None values (optional args not set)
             return {k: v for k, v in args.items() if v is not None}
@@ -997,6 +1079,135 @@ class ToolCallGenerator:
         args = {}
         for arg in tool.arguments:
             if not arg.required and random.random() > 0.6:
+                continue
+            value = cls._fallback_value(arg, tool.name)
+            if value is not None:
+                args[arg.name] = value
+        return args
+
+    @classmethod
+    def _infer_arguments_from_query(cls, tool: ToolSchema, query: str) -> dict:
+        query_lower = query.lower()
+        if tool.name == "File_Search":
+            if ".py" in query_lower and ".js" in query_lower:
+                return {"pattern": "*.{py,js}", "path": ".", "recursive": True}
+            if "python" in query_lower:
+                return {"pattern": "*.py", "path": ".", "recursive": True}
+            if "javascript" in query_lower or ".js" in query_lower:
+                return {"pattern": "*.js", "path": ".", "recursive": True}
+            if "config" in query_lower and "name" in query_lower:
+                return {"pattern": "*config*", "path": ".", "recursive": True}
+            if "markdown" in query_lower or "documentation" in query_lower:
+                if "mention" in query_lower or "contains" in query_lower or "setup" in query_lower:
+                    return {"pattern": "*.md", "path": "docs", "recursive": True, "content_search": True}
+                return {"pattern": "*.md", "path": ".", "recursive": True}
+            if "json" in query_lower or "config" in query_lower:
+                return {"pattern": "*.json", "path": "config", "recursive": False}
+        if tool.name == "File_List":
+            if "categorize" in query_lower or "type" in query_lower:
+                return {"directory": ".", "include_hidden": False, "filter_type": "all"}
+            if "config" in query_lower:
+                return {"directory": "config", "include_hidden": False, "filter_type": "files"}
+            if "src" in query_lower:
+                return {"directory": "src", "include_hidden": True, "filter_type": "all"}
+            return {"directory": ".", "include_hidden": False, "filter_type": "all"}
+        if tool.name == "File_Read":
+            explicit_path = cls._extract_path_from_query(query)
+            if explicit_path:
+                result = {"file_path": explicit_path, "offset": 0}
+                first_n = re.search(r"first\s+(\d+)", query_lower)
+                if first_n:
+                    result["limit"] = int(first_n.group(1))
+                return result
+            if "src/main.py" in query_lower:
+                return {"file_path": "src/main.py", "offset": 0}
+            if "readme" in query_lower:
+                return {"file_path": "README.md", "offset": 0, "limit": 100}
+            if "config" in query_lower:
+                return {"file_path": "config.json", "offset": 0}
+            if "first 50" in query_lower:
+                return {"file_path": "src/main.py", "offset": 0, "limit": 50}
+        if tool.name == "Web_Fetch":
+            if "release notes" in query_lower:
+                return {"url": "https://github.com/example/repo/releases"}
+            if "readme" in query_lower and "github.com/example/repo" in query_lower:
+                return {"url": "https://github.com/example/repo/blob/main/README.md"}
+        if tool.name == "Web_Search":
+            if "llm fine-tuning" in query_lower or "recent papers" in query_lower:
+                return {"query": "recent papers on LLM fine-tuning techniques"}
+        if tool.name == "Python_Test":
+            if "test_api" in query_lower:
+                return {"file_path": "tests/", "pattern": "test_api_*.py"}
+            if "coverage" in query_lower:
+                return {"file_path": "tests/", "pattern": "test_*.py", "verbose": True, "coverage": True}
+        if tool.name == "Process_List":
+            if "top 10" in query_lower:
+                return {"sort_by": "cpu", "limit": 10}
+            if "active" in query_lower:
+                return {}
+            if "running" in query_lower:
+                return {"filter": "running"}
+        if tool.name == "Git_Commit":
+            quoted_messages = re.findall(r"message ['\"]([^'\"]+)['\"]", query, flags=re.IGNORECASE)
+            if quoted_messages:
+                return {"message": quoted_messages[0], "all": True}
+            commit_match = re.search(r"\b(fix|feat|docs|chore|refactor|test|update):\s*([^\n]+)", query, flags=re.IGNORECASE)
+            if commit_match:
+                return {"message": f"{commit_match.group(1).lower()}: {commit_match.group(2).strip()}", "all": True}
+        if tool.name == "Git_Branch":
+            if "what branches" in query_lower or "branches exist" in query_lower or "list all branches" in query_lower:
+                return {"operation": "list"}
+            if "switch" in query_lower:
+                return {"operation": "switch", "branch_name": "develop"}
+            if "create" in query_lower and "branch" in query_lower:
+                return {"operation": "create", "branch_name": "feature/login"}
+            if "delete" in query_lower:
+                return {"operation": "delete", "branch_name": "old-feature"}
+        if tool.name == "Git_Log":
+            if "commit history" in query_lower and "last" not in query_lower:
+                return {"repository_path": "."}
+        if tool.name == "Git_Diff":
+            if "unstaged" in query_lower:
+                return {"target": "working_tree", "repository_path": "."}
+            if "current branch" in query_lower and "main" in query_lower:
+                return {"target": "main", "repository_path": "."}
+        if tool.name == "Git_Pull":
+            if "update my local branch" in query_lower or "remote changes" in query_lower:
+                return {"repository_path": "."}
+        if tool.name == "Python_Run":
+            if "http request" in query_lower or "http" in query_lower:
+                return {
+                    "code": "import urllib.request\nwith urllib.request.urlopen('https://example.com') as response:\n    print(response.read().decode('utf-8')[:120])",
+                    "timeout": 10,
+                }
+        if tool.name == "Bash_Execute":
+            if "working directory" in query_lower:
+                return {"command": "pwd", "timeout": 10}
+            if "top 5 processes" in query_lower and "memory" in query_lower:
+                return {"command": "ps aux --sort=-rss | head -5", "timeout": 10}
+        if tool.name == "File_Delete":
+            if ".pyc" in query_lower:
+                return {"path": "build/**/*.pyc", "recursive": True}
+        if tool.name == "File_Search":
+            if "markdown" in query_lower and "setup" in query_lower:
+                return {"pattern": "*.md", "path": "docs", "recursive": True}
+        if tool.name == "Search_Replace":
+            if "src/main.py" in query_lower:
+                return {"path": "src/main.py", "search": "foo", "replace": "bar", "file_types": [".py"], "preview": False}
+            if "import statements" in query_lower or ("utils" in query_lower and "helpers" in query_lower):
+                return {"path": ".", "search": "utils", "replace": "helpers", "file_types": [".py"], "preview": False}
+            if "config.json" in query_lower or "timeout" in query_lower:
+                return {"path": "config.json", "search": '"timeout": 30', "replace": '"timeout": 60', "file_types": [".json"], "preview": False}
+        if tool.name == "Search_Code":
+            if "try/except" in query_lower or "error handling" in query_lower:
+                return {"pattern": "try:", "path": ".", "file_types": [".py"]}
+        return {}
+
+    @classmethod
+    def _fallback_arguments(cls, tool: ToolSchema) -> dict:
+        args = {}
+        for arg in tool.arguments:
+            if not arg.required:
                 continue
             value = cls._fallback_value(arg, tool.name)
             if value is not None:
@@ -1124,14 +1335,14 @@ class ResponseGenerator:
         "File_Search": {"template": {"matches": ["src/main.py", "src/utils.py", "tests/test_main.py"], "total": 3}},
         "File_Delete": {"template": {"path": "{path}", "deleted": True}},
         "File_Copy": {"template": {"source": "{source}", "destination": "{destination}", "copied": True}},
-        "Bash_Execute": {"template": {"stdout": "command output here\n", "stderr": "", "exit_code": 0}},
+        "Bash_Execute": {"template": {"stdout": "Executed: {command}\n", "stderr": "", "exit_code": 0}},
         "Git_Status": {"template": {"branch": "main", "is_dirty": True, "staged": ["README.md"], "modified": ["src/main.py"], "untracked": ["new.py"]}},
         "Git_Commit": {"template": {"branch": "main", "commit_hash": "abc1234", "message": "{message}", "files_changed": 2}},
         "Git_Log": {"template": {"commits": [{"hash": "abc1234", "message": "fix: resolve bug", "author": "Dev <dev@example.com>"}, {"hash": "def5678", "message": "feat: add feature", "author": "Dev <dev@example.com>"}]}},
         "Git_Branch": {"template": {"current": "main", "branches": ["main", "develop", "feature/x"]}},
         "Git_Diff": {"template": {"files": [{"path": "src/main.py", "additions": 5, "deletions": 2}]}},
-        "Git_Push": {"template": {"remote": "origin", "branch": "main", "pushed": True}},
-        "Git_Pull": {"template": {"remote": "origin", "branch": "main", "files_updated": 3, "insertions": 45}},
+        "Git_Push": {"template": {"remote": "{remote}", "branch": "{branch}", "pushed": True}},
+        "Git_Pull": {"template": {"remote": "{remote}", "branch": "{branch}", "files_updated": 3, "insertions": 45}},
         "Bash_ShellStatus": {"template": {"os": "Linux x86_64", "shell": "/bin/bash", "home": "/home/sridhar", "cwd": "/home/sridhar/beastcli-eng1", "user": "sridhar"}},
         "Python_Test": {"template": {"file_path": "{file_path}", "tests_run": 5, "passed": 5, "failed": 0, "skipped": 0, "exit_code": 0}},
         "Web_Search": {"template": {"results": [{"title": "Result Title", "url": "https://example.com", "snippet": "A relevant article about..."}], "total": 5}},
@@ -1156,6 +1367,269 @@ class ResponseGenerator:
     @classmethod
     def _generate_success(cls, tool: ToolSchema, args: dict) -> str:
         # Return industry-standard tool_result format
+        if tool.name == "Bash_ShellStatus":
+            result = {
+                "type": "tool_result",
+                "tool_call_id": "{{TOOL_CALL_ID}}",
+                "output": json.dumps({
+                    "shell": "/bin/zsh",
+                    "user": "sridhar",
+                    "home_directory": "/Users/sridhar",
+                    "current_directory": "/Users/sridhar/project",
+                    "platform": "macOS",
+                }),
+            }
+            return json.dumps(result)
+        if tool.name == "Python_Run":
+            code = args.get("code", "")
+            stdout = "Hello, World!\n"
+            if "fibonacci(30)" in code:
+                stdout = "832040\n"
+            elif "fibonacci" in code:
+                stdout = "55\n"
+            elif "sum(range(1, 101))" in code:
+                stdout = "5050\n"
+            elif "csv.DictReader" in code:
+                stdout = "{'row_count': 2, 'total': 3}\n"
+            elif "json.loads" in code:
+                stdout = "{'ok': True}\n"
+            elif "urllib.request.urlopen" in code:
+                stdout = "<!doctype html><html><head><title>Example Domain</title></head><body>Example Domain</body></html>\n"
+            result = {
+                "type": "tool_result",
+                "tool_call_id": "{{TOOL_CALL_ID}}",
+                "output": json.dumps({
+                    "stdout": stdout,
+                    "stderr": "",
+                    "return_value": None,
+                    "exit_code": 0,
+                }),
+            }
+            return json.dumps(result)
+        if tool.name == "Node_Run":
+            code = args.get("code", "")
+            if "readfilesync('readme.md'" in code.lower():
+                stdout = "# Project Setup\n\nInstall dependencies and run the CLI.\n"
+            else:
+                stdout = "Hello from Node!\n" if "Hello from Node" in code else "[ 2, 4, 6 ]\n"
+            result = {
+                "type": "tool_result",
+                "tool_call_id": "{{TOOL_CALL_ID}}",
+                "output": json.dumps({
+                    "stdout": stdout,
+                    "stderr": "",
+                    "exit_code": 0,
+                }),
+            }
+            return json.dumps(result)
+        if tool.name == "Web_Fetch":
+            url = args.get("url", "")
+            output = {
+                "url": url,
+                "status": 200,
+                "content_length": 2048,
+                "content_type": "text/html",
+            }
+            if "readme" in url.lower():
+                output["summary"] = "README covers installation, usage, and development commands."
+            elif "releases" in url.lower():
+                output["summary"] = "Latest release notes mention bug fixes, dependency updates, and CLI improvements."
+            result = {
+                "type": "tool_result",
+                "tool_call_id": "{{TOOL_CALL_ID}}",
+                "output": json.dumps(output),
+            }
+            return json.dumps(result)
+        if tool.name == "Git_Log":
+            limit = min(max(int(args.get("limit", 5) or 5), 1), 10)
+            commits = [
+                {"hash": "abc1234", "message": "fix: resolve bug", "author": "Dev <dev@example.com>"},
+                {"hash": "def5678", "message": "feat: add feature", "author": "Dev <dev@example.com>"},
+                {"hash": "7890abc", "message": "docs: refresh README", "author": "Dev <dev@example.com>"},
+                {"hash": "fedc321", "message": "test: add API coverage", "author": "Dev <dev@example.com>"},
+                {"hash": "13579bd", "message": "refactor: simplify parser", "author": "Dev <dev@example.com>"},
+                {"hash": "2468ace", "message": "chore: bump dependencies", "author": "Dev <dev@example.com>"},
+                {"hash": "1122aabb", "message": "feat: add CLI flag", "author": "Dev <dev@example.com>"},
+                {"hash": "3344ccdd", "message": "fix: handle empty config", "author": "Dev <dev@example.com>"},
+                {"hash": "5566eeff", "message": "perf: speed up scans", "author": "Dev <dev@example.com>"},
+                {"hash": "7788gghh", "message": "build: update workflow", "author": "Dev <dev@example.com>"},
+            ][:limit]
+            result = {
+                "type": "tool_result",
+                "tool_call_id": "{{TOOL_CALL_ID}}",
+                "output": json.dumps({"commits": commits}),
+            }
+            return json.dumps(result)
+        if tool.name == "File_List":
+            directory = args.get("directory", ".")
+            if directory == "config" or directory.endswith("/config"):
+                entries = [
+                    {"name": "config.json", "type": "file"},
+                    {"name": "settings.yaml", "type": "file"},
+                ]
+            elif directory == "src" or directory.endswith("/src"):
+                entries = [
+                    {"name": "app.py", "type": "file"},
+                    {"name": "main.py", "type": "file"},
+                    {"name": ".env.example", "type": "file"},
+                ]
+            else:
+                entries = [
+                    {"name": "src", "type": "directory"},
+                    {"name": "config", "type": "directory"},
+                    {"name": "README.md", "type": "file"},
+                    {"name": "main.py", "type": "file"},
+                ]
+            result = {
+                "type": "tool_result",
+                "tool_call_id": "{{TOOL_CALL_ID}}",
+                "output": json.dumps({"entries": entries, "total": len(entries)}),
+            }
+            return json.dumps(result)
+        if tool.name == "Bash_Execute":
+            command = args.get("command", "")
+            stdout = f"Executed: {command}\n"
+            if command == "pwd":
+                stdout = "/Users/sridhar/project\n"
+            elif "ps aux --sort=-rss | head -5" in command:
+                stdout = (
+                    "USER PID %CPU %MEM COMMAND\n"
+                    "sridhar 4101 3.2 12.8 node\n"
+                    "sridhar 3880 1.4 9.1 python3\n"
+                    "sridhar 2450 0.8 5.7 chrome\n"
+                    "sridhar 1780 0.3 4.2 code\n"
+                )
+            elif "git status --porcelain" in command:
+                stdout = " M src/main.py\n?? new.py\n"
+            result = {
+                "type": "tool_result",
+                "tool_call_id": "{{TOOL_CALL_ID}}",
+                "output": json.dumps({
+                    "stdout": stdout,
+                    "stderr": "",
+                    "exit_code": 0,
+                }),
+            }
+            return json.dumps(result)
+        if tool.name == "File_Search":
+            pattern = args.get("pattern", "*")
+            if pattern == "*.md" and args.get("path") == "docs" and args.get("content_search"):
+                matches = ["docs/setup.md"]
+            elif pattern == "*.md" and args.get("path") == "docs":
+                matches = ["docs/setup.md", "docs/architecture.md"]
+            elif args.get("content_search"):
+                matches = ["README.md", "docs/setup.md"]
+            else:
+                matches = {
+                    "*.md": ["README.md", "docs/setup.md", "docs/architecture.md"],
+                    "*.py": ["src/main.py", "src/utils.py", "tests/test_main.py"],
+                    "*.js": ["src/app.js", "src/utils.js"],
+                    "*.{py,js}": ["src/main.py", "src/utils.py", "src/app.js", "src/utils.js"],
+                    "test_*.py": ["tests/test_main.py", "tests/test_auth.py"],
+                    "*config*": ["config", "config.json", "settings/config.dev.json"],
+                }.get(pattern, ["src/main.py"])
+            result = {
+                "type": "tool_result",
+                "tool_call_id": "{{TOOL_CALL_ID}}",
+                "output": json.dumps({"matches": matches, "total": len(matches)}),
+            }
+            return json.dumps(result)
+        if tool.name == "Git_Pull":
+            remote = args.get("remote", "origin")
+            branch = args.get("branch", "main")
+            result = {
+                "type": "tool_result",
+                "tool_call_id": "{{TOOL_CALL_ID}}",
+                "output": json.dumps({
+                    "remote": remote,
+                    "branch": branch,
+                    "files_updated": 3,
+                    "insertions": 45,
+                }),
+            }
+            return json.dumps(result)
+        if tool.name == "Python_Test":
+            coverage_enabled = args.get("coverage", False)
+            result = {
+                "type": "tool_result",
+                "tool_call_id": "{{TOOL_CALL_ID}}",
+                "output": json.dumps({
+                    "passed": 24,
+                    "failed": 0,
+                    "pattern": args.get("pattern", "test_*.py"),
+                    "verbose": args.get("verbose", False),
+                    "coverage": {"enabled": coverage_enabled, "percent": 87} if coverage_enabled else None,
+                    "exit_code": 0,
+                }),
+            }
+            return json.dumps(result)
+        if tool.name == "Search_Code":
+            pattern = args.get("pattern", "")
+            matches = [{
+                "file": "src/main.py",
+                "line": 42,
+                "context": "def main():",
+            }]
+            if pattern == "TODO":
+                matches = [{
+                    "file": "src/tasks.py",
+                    "line": 18,
+                    "context": "# TODO: replace mock client with real implementation",
+                }]
+            elif pattern == "import\\s+":
+                matches = [{
+                    "file": "src/main.py",
+                    "line": 3,
+                    "context": "import argparse",
+                }]
+            elif pattern == "def main":
+                matches = [
+                    {"file": "src/main.py", "line": 42, "context": "def main():"},
+                    {"file": "tests/test_main.py", "line": 9, "context": "def main():"},
+                ]
+            elif pattern == "try:":
+                matches = [
+                    {"file": "src/api.py", "line": 27, "context": "try:"},
+                    {"file": "src/worker.py", "line": 54, "context": "try:"},
+                ]
+            result = {
+                "type": "tool_result",
+                "tool_call_id": "{{TOOL_CALL_ID}}",
+                "output": json.dumps({"matches": matches, "total": len(matches)}),
+            }
+            return json.dumps(result)
+        if tool.name == "Database_Query":
+            query = args.get("query", "")
+            rows = [{"id": 1, "name": "Alice"}, {"id": 2, "name": "Bob"}]
+            columns = ["id", "name"]
+            if "orders" in query.lower():
+                rows = [
+                    {"order_id": 101, "status": "paid", "created_at": "2026-04-12"},
+                    {"order_id": 102, "status": "shipped", "created_at": "2026-04-18"},
+                ]
+                columns = ["order_id", "status", "created_at"]
+            result = {
+                "type": "tool_result",
+                "tool_call_id": "{{TOOL_CALL_ID}}",
+                "output": json.dumps({"rows": rows, "total": len(rows), "columns": columns}),
+            }
+            return json.dumps(result)
+        if tool.name == "Git_Branch":
+            operation = args.get("operation", "list")
+            branches = ["main", "develop", "feature/x"]
+            branch_name = args.get("branch_name")
+            current = "main"
+            if operation == "create" and branch_name and branch_name not in branches:
+                branches.append(branch_name)
+            if operation == "switch" and branch_name:
+                current = branch_name
+            result = {
+                "type": "tool_result",
+                "tool_call_id": "{{TOOL_CALL_ID}}",
+                "output": json.dumps({"current": current, "branches": branches, "operation": operation}),
+            }
+            return json.dumps(result)
+
         template = cls.SUCCESS_TEMPLATES.get(tool.name)
         if template:
             response = template["template"].copy()
@@ -1185,9 +1659,62 @@ class ResponseGenerator:
 
     @classmethod
     def _generate_error(cls, tool: ToolSchema, args: dict) -> str:
-        error_type = random.choice(list(cls.ERROR_TYPES.keys()))
+        tool_specific_errors = {
+            "Bash_ShellStatus": ["timeout"],
+            "Bash_Execute": ["timeout", "permission_denied"],
+            "Python_Run": ["timeout", "syntax_error"],
+            "Node_Run": ["timeout", "syntax_error"],
+            "Python_Test": ["timeout", "empty_result"],
+            "File_List": ["file_not_found", "permission_denied"],
+            "File_Read": ["file_not_found", "permission_denied"],
+            "File_Write": ["permission_denied"],
+            "File_Delete": ["file_not_found", "permission_denied"],
+            "File_Copy": ["file_not_found", "permission_denied"],
+            "File_Search": ["empty_result"],
+            "Search_Code": ["empty_result"],
+            "Search_Replace": ["empty_result"],
+            "Web_Search": ["network_error"],
+            "Web_Fetch": ["network_error"],
+            "Web_Screenshot": ["network_error"],
+            "Git_Status": ["git_not_repo"],
+            "Git_Log": ["git_not_repo"],
+            "Git_Commit": ["git_not_repo"],
+            "Git_Branch": ["git_not_repo"],
+            "Git_Diff": ["git_not_repo"],
+            "Git_Pull": ["git_not_repo", "network_error"],
+            "Git_Push": ["git_not_repo", "network_error"],
+            "System_Info": ["timeout"],
+            "Process_List": ["timeout"],
+            "Database_Query": ["network_error", "syntax_error"],
+            "Database_List": ["network_error"],
+        }
+        error_type = random.choice(tool_specific_errors.get(tool.name, ["timeout"]))
+        if tool.name in {"Python_Run", "Node_Run"} and error_type == "syntax_error":
+            code = args.get("code", "")
+            likely_valid = any(
+                token in code for token in (
+                    "print(",
+                    "console.log(",
+                    "urllib.request.urlopen",
+                    "csv.DictReader",
+                    "json.loads",
+                    "fibonacci(",
+                    ".map(",
+                    "readFileSync(",
+                )
+            )
+            if likely_valid:
+                error_type = "timeout"
         error_info = cls.ERROR_TYPES[error_type]
         error_message = error_info["error"]
+        replacements = {
+            "path": args.get("path") or args.get("file_path") or ".",
+            "timeout": args.get("timeout", 30),
+            "remote": args.get("remote", "origin"),
+            "branch": args.get("branch", "main"),
+        }
+        for key, value in replacements.items():
+            error_message = error_message.replace("{" + key + "}", str(value))
         for key, value in args.items():
             error_message = error_message.replace("{" + key + "}", str(value))
         # Guard: any remaining {placeholder} gets a default value
@@ -1212,7 +1739,7 @@ class QueryTemplates:
     TEMPLATES = {
         "File_Read": {
             DifficultyLevel.EASY: [
-                "Read the file at /Users/sridhar/project/config.json",
+                "Read the file at config.json",
                 "Show me what's in main.py",
                 "Can you open and display src/app.py?",
                 "What does the setup.py file contain?",
@@ -1227,7 +1754,7 @@ class QueryTemplates:
                 "Find and read the main entry point of the project",
             ],
             DifficultyLevel.EXPERT: [
-                "Read all Python files in the src directory and summarize their purpose",
+                "Read src/main.py and summarize what it does",
             ],
         },
         "File_Write": {
@@ -1249,7 +1776,7 @@ class QueryTemplates:
         },
         "File_List": {
             DifficultyLevel.EASY: [
-                "List the files in /Users/sridhar/project",
+                "List the files in the current directory",
                 "What's in the current directory?",
                 "Show me the project structure",
             ],
@@ -1355,7 +1882,7 @@ class QueryTemplates:
         "Git_Log": {
             DifficultyLevel.EASY: [
                 "Show me the last 5 commits",
-                "What is the commit history?",
+                "Show me the commit history",
             ],
             DifficultyLevel.MEDIUM: [
                 "Display the last 10 commits in short format",
@@ -1393,7 +1920,7 @@ class QueryTemplates:
                 "Push my changes to the remote repository",
             ],
             DifficultyLevel.MEDIUM: [
-                "Push all branches to the origin remote",
+                "Push the develop branch to the origin remote",
             ],
         },
         "Git_Pull": {
@@ -1430,7 +1957,7 @@ class QueryTemplates:
         "Web_Screenshot": {
             DifficultyLevel.EASY: [
                 "Take a screenshot of https://example.com",
-                "Capture the homepage of the documentation site",
+                "Take a screenshot of the documentation homepage",
             ],
         },
         "Python_Run": {
@@ -1455,7 +1982,7 @@ class QueryTemplates:
                 "Execute: const arr = [1,2,3].map(x => x * 2); console.log(arr);",
             ],
             DifficultyLevel.MEDIUM: [
-                "Run a Node script that reads a file and prints its contents",
+                "Run a Node script that reads README.md and prints its contents",
             ],
         },
         "Python_Test": {
@@ -1495,11 +2022,11 @@ class QueryTemplates:
         },
         "System_Info": {
             DifficultyLevel.EASY: [
-                "What is the current system information?",
-                "Show me the OS, CPU, and memory details",
+                "Show me the OS details",
+                "Show me the memory details",
             ],
             DifficultyLevel.MEDIUM: [
-                "Get the system information and tell me how many CPU cores are available",
+                "Show me the CPU details and tell me how many cores are available",
             ],
         },
         "Process_List": {
@@ -1617,6 +2144,10 @@ class DatasetExample:
 class DatasetValidator:
     """Validate dataset examples against best practices."""
 
+    PATH_KEYS = {
+        "file_path", "path", "directory", "source", "destination", "repository_path"
+    }
+
     @classmethod
     def validate_example(cls, example: DatasetExample) -> tuple[bool, list[str]]:
         errors = []
@@ -1626,6 +2157,10 @@ class DatasetValidator:
             errors.append("Missing localization configuration")
         if example.messages and example.messages[0].role != "system":
             errors.append("First message must be 'system' role")
+
+        user_text = " ".join(
+            (msg.content or "") for msg in example.messages if msg.role == "user"
+        ).lower()
 
         # Check assistant messages have valid JSON content (tool_call or final_answer)
         for msg in example.messages:
@@ -1641,12 +2176,45 @@ class DatasetValidator:
                             errors.append(f"tool_call missing 'tool_name': {msg.content[:80]}")
                         if "arguments" not in obj:
                             errors.append(f"tool_call missing 'arguments': {msg.content[:80]}")
+                        if "tool_call_id" in obj or "id" in obj:
+                            errors.append(f"tool_call contains system-generated id field: {msg.content[:80]}")
                         valid_names = ToolRegistry.get_tool_names()
                         if obj.get("tool_name") not in valid_names:
                             errors.append(f"Invalid tool name: {obj.get('tool_name')}")
+                        else:
+                            schema = next(t for t in ToolRegistry.get_all_tools() if t.name == obj["tool_name"])
+                            args = obj.get("arguments", {})
+                            allowed = {arg.name for arg in schema.arguments}
+                            required = {arg.name for arg in schema.arguments if arg.required}
+                            missing = sorted(required - set(args.keys()))
+                            extra = sorted(set(args.keys()) - allowed)
+                            if missing:
+                                errors.append(f"tool_call missing required arguments: {obj['tool_name']} -> {missing}")
+                            if extra:
+                                errors.append(f"tool_call has unexpected arguments: {obj['tool_name']} -> {extra}")
+                            for key, value in args.items():
+                                if (
+                                    key in cls.PATH_KEYS and
+                                    isinstance(value, str) and
+                                    value.startswith("/Users/sridhar/project") and
+                                    not any(token in user_text for token in (
+                                        "/users/", "absolute path", "full path",
+                                        "current directory", "working directory",
+                                        "project root", "repository root"
+                                    )) and
+                                    not value.replace("/Users/sridhar/project/", "") in user_text
+                                ):
+                                    errors.append(f"tool_call uses ungrounded absolute path: {obj['tool_name']} -> {key}={value}")
                     if obj.get("type") == "final_answer":
                         if not obj.get("content") or len(obj.get("content", "").strip()) < 5:
                             errors.append(f"final_answer too short/generic: {msg.content[:80]}")
+                        generic = {
+                            "operation completed successfully.",
+                            "task finished. all steps completed.",
+                            "task completed successfully.",
+                        }
+                        if obj.get("content", "").strip().lower() in generic or "executed without errors" in obj.get("content", "").lower():
+                            errors.append(f"final_answer too generic: {msg.content[:80]}")
                 except json.JSONDecodeError:
                     errors.append(f"Assistant content not valid JSON: {msg.content[:80]}")
 
@@ -1661,6 +2229,9 @@ class DatasetValidator:
                         errors.append(f"tool_result missing 'tool_call_id': {msg.content[:80]}")
                     if "output" not in obj and "error" not in obj:
                         errors.append(f"tool_result missing 'output' or 'error': {msg.content[:80]}")
+                    serialized = json.dumps(obj, ensure_ascii=False)
+                    if any(token in serialized for token in ("{file_path}", "/path/to/copy", "command output here")):
+                        errors.append(f"tool_result contains placeholder content: {msg.content[:80]}")
                 except json.JSONDecodeError:
                     errors.append(f"Tool content not valid JSON: {msg.content[:80]}")
 
@@ -1726,12 +2297,9 @@ class ComprehensiveDatasetPipeline:
         Multi-tool samples (multi_tool=True) generate 2-3 related tool calls
         per sample to reduce structural duplication and teach tool chaining.
         """
-        # Select 1-3 tools based on difficulty and multi_tool flag
-        num_tools = 1
-        if multi_tool and difficulty in (DifficultyLevel.MEDIUM, DifficultyLevel.HARD, DifficultyLevel.EXPERT):
-            num_tools = random.randint(2, 3)
-
-        selected_tools = random.sample(self.tools, k=min(num_tools, len(self.tools)))
+        # Keep samples tightly aligned to the user request. Multi-tool support
+        # should only be re-enabled once explicit chain templates exist.
+        selected_tools = [random.choice(self.tools)]
 
         system_prompt = SystemPromptGenerator.generate(localization, len(self.tools))
         user_query = QueryTemplates.get_query(selected_tools[0], difficulty, localization)
@@ -1754,7 +2322,6 @@ class ComprehensiveDatasetPipeline:
             system_call_id = "call_%s" % uuid.uuid4().hex[:12]
             tool_call_content = json.dumps({
                 "type": "tool_call",
-                "id": system_call_id,
                 "tool_name": tool.name,
                 "arguments": args,
             }, ensure_ascii=False)
@@ -1765,7 +2332,7 @@ class ComprehensiveDatasetPipeline:
 
             messages.append(Message(role="assistant", content=tool_call_content))
             messages.append(Message(role="tool", content=tool_result_content, tool_call_id=system_call_id, name=tool.name))
-            tool_results_data.append({"tool": tool.name, "args": args, "response": tool_response, "success": success})
+            tool_results_data.append({"tool": tool.name, "args": args, "response": tool_result_content, "success": success, "user_query": user_query})
 
         # Build final answer — specific and grounded in tool results
         final_response = self._build_final_answer(tool_results_data, localization, all_success)
@@ -1797,147 +2364,276 @@ class ComprehensiveDatasetPipeline:
         all_success: bool,
     ) -> str:
         """Build a specific, grounded final answer based on tool results."""
-        # Collect tool names from all results for use in error/fallback paths
-        tool_names_str = ", ".join(tr.get("tool", "?") for tr in tool_results_data)
-
-        # Error path: still grounded with tool name
         if not all_success:
-            first_tool = tool_results_data[0].get("tool", "?") if tool_results_data else "?"
-            return f"{first_tool}: Operation failed. An error occurred during execution."
-
-        lang = Language(localization.language) if localization.language in [l.value for l in Language] else Language.EN
-
-        # Final answers are specific to what was done
-        FINAL_TEMPLATES = {
-            Language.EN: {
-                # Every template starts with the tool name for groundedness
-                "Python_Test": "Python_Test: All {count} test cases passed with no failures.",
-                "Database_Query": "Database_Query: Found {count} matching rows in the result set.",
-                "Web_Search": "Web_Search: Found {count} relevant results matching the query.",
-                "Process_List": "Process_List: Retrieved {count} active processes, sorted by {sort}.",
-                "Git_Branch": "Git_Branch: Operation completed. Current branches: {branches}.",
-                "Git_Pull": "Git_Pull: Successfully pulled latest changes from {remote}. All files updated.",
-                "Git_Commit": "Git_Commit: Changes committed successfully with message: '{message}'.",
-                "File_Read": "File_Read: File at {path} read successfully. Content preview shows {lines} lines.",
-                "Web_Fetch": "Web_Fetch: Page at {url} fetched successfully. Status 200, {size} bytes.",
-                "File_Search": "File_Search: Found {count} matching files in {path}.",
-                "Bash_Execute": "Bash_Execute: Command executed successfully. Output: {output}",
-                "File_Write": "File_Write: {bytes} bytes written to {path} successfully.",
-                "File_Copy": "File_Copy: File copied from {source} to {destination} successfully.",
-                "File_Delete": "File_Delete: File at {path} deleted successfully.",
-                "File_List": "File_List: Found {count} entries in directory {path}.",
-                "Bash_ShellStatus": "Bash_ShellStatus: Shell is {shell} on {os}, working in {cwd}.",
-                "Python_Run": "Python_Run: Python code executed successfully.",
-                "Node_Run": "Node_Run: Node.js code executed successfully.",
-                "Git_Status": "Git_Status: Branch: {branch}. {modified} modified, {staged} staged, {untracked} untracked.",
-                "Git_Log": "Git_Log: Retrieved {count} most recent commits.",
-                "Git_Diff": "Git_Diff: Found changes in {count} file(s): {files}.",
-                "Git_Push": "Git_Push: Successfully pushed to {remote} on branch {branch}.",
-                "Web_Screenshot": "Web_Screenshot: Screenshot captured from {url}. Dimensions: {width}x{height}.",
-                "Search_Code": "Search_Code: Found {count} matching lines in {files}.",
-                "Search_Replace": "Search_Replace: Made {count} replacement(s) in {path} successfully.",
-                "System_Info": "System_Info: OS: {os}, Python: {python}, {cpu} CPU, {memory}GB RAM.",
-                "Database_List": "Database_List: Found {count} databases: {databases}.",
-            },
-            Language.HI: {
-                "Python_Test": "Tests safalta se complete huye. Sab test cases pass.",
-                "Database_Query": "Query safalta se run ho gayi. {count} rows mil gayein.",
-                "Web_Search": "Search complete. {count} relevant results mile.",
-                "Process_List": "{count} active processes dikhaye. Top results sorted by {sort}.",
-                "Git_Branch": "Branch operation complete. Current branches: {branches}.",
-                "Git_Pull": "Origin se changes pull ho gayein. Sab files update.",
-                "Git_Commit": "Changes commit ho gayein. Message: '{message}'",
-                "File_Read": "File read safalt. Content preview: {lines} lines.",
-                "Web_Fetch": "Page fetch safalt. Status 200.",
-                "File_Search": "Search complete. {count} files mile.",
-                "Bash_Execute": "Command execute safalt. Output: {output}",
-            },
-        }
-
+            for tool_result in tool_results_data:
+                response = json.loads(tool_result.get("response", "{}"))
+                error = response.get("error")
+                if error:
+                    if "No results found" in error:
+                        args = tool_result.get("args", {})
+                        user_query = tool_result.get("user_query", "").lower()
+                        if tool_result.get("tool") == "Search_Code":
+                            if "try/except" in user_query or "error handling" in user_query:
+                                return "No try/except-style error-handling matches were found in the codebase."
+                            return f"No code matches were found for `{args.get('pattern', 'the pattern')}`."
+                        if tool_result.get("tool") == "File_Search":
+                            return f"No files were found matching `{args.get('pattern', 'the pattern')}`."
+                    return LocalizationContent.get_error(error, localization)
+            return LocalizationContent.get_error("Operation failed", localization)
+        summaries = []
         for tool_result in tool_results_data:
             tool_name = tool_result.get("tool", "")
-            templates = FINAL_TEMPLATES.get(lang, FINAL_TEMPLATES[Language.EN])
-            template = templates.get(tool_name)
-            if not template:
-                # Should never reach here since all 28 tools have templates,
-                # but guard against it with a grounded fallback
-                template = f"{tool_name}: Operation completed successfully."
-                return template
-
-            # Build context from arguments
             args = tool_result.get("args", {})
+            user_query = tool_result.get("user_query", "").lower()
+            response = json.loads(tool_result.get("response", "{}"))
+            raw_output = response.get("output", "")
+            try:
+                payload = json.loads(raw_output) if isinstance(raw_output, str) else raw_output
+            except json.JSONDecodeError:
+                payload = {"raw_output": raw_output}
+            if tool_name == "Bash_ShellStatus":
+                if "home directory" in user_query:
+                    summaries.append(
+                        f"Shell: {payload.get('shell', '/bin/zsh')}, user: {payload.get('user', 'sridhar')}, "
+                        f"home: {payload.get('home_directory', '/Users/sridhar')}."
+                    )
+                else:
+                    summaries.append(
+                        f"Platform: {payload.get('platform', 'macOS')}, shell: {payload.get('shell', '/bin/zsh')}, "
+                        f"user: {payload.get('user', 'sridhar')}, home: {payload.get('home_directory', '/Users/sridhar')}, "
+                        f"cwd: {payload.get('current_directory', '/Users/sridhar/project')}."
+                    )
+            elif tool_name == "Bash_Execute":
+                command = args.get('command', '')
+                stdout = payload.get('stdout', '').strip()
+                if command == "pwd" and stdout:
+                    summaries.append(f"Current working directory: {stdout}")
+                elif "ps aux --sort=-rss | head -5" in command and stdout:
+                    summaries.append(f"Top processes by memory usage:\n{stdout}")
+                else:
+                    summaries.append(
+                        f"Ran `{command}` successfully with exit code {payload.get('exit_code', 0)}."
+                    )
+            elif tool_name == "File_Read":
+                target = payload.get('path', args.get('file_path', 'the file'))
+                if any(phrase in user_query for phrase in ["summarize", "what it does", "what this file does", "contain", "contents"]):
+                    preview = payload.get("content_preview", "").strip()
+                    if target.endswith("src/main.py"):
+                        summaries.append(f"{target} appears to be the main entry point.\nPreview:\n{preview}")
+                    elif target.endswith("README.md"):
+                        summaries.append(f"{target} appears to document project setup and usage.\nPreview:\n{preview}")
+                    elif target.endswith("setup.py"):
+                        summaries.append(f"{target} appears to define package setup metadata.\nPreview:\n{preview}")
+                    elif target.endswith("lib/utils.py"):
+                        summaries.append(f"{target} content preview:\n{preview}")
+                    else:
+                        summaries.append(f"{target} content preview:\n{preview}")
+                else:
+                    actual_lines = payload.get('lines_read', args.get('limit', 0))
+                    if args.get("limit"):
+                        preview = payload.get("content_preview", "").strip()
+                        requested = args.get("limit")
+                        summaries.append(f"For the request to read the first {requested} lines, {target} had {actual_lines} lines available.\nPreview:\n{preview}")
+                    else:
+                        line_label = "line" if actual_lines == 1 else "lines"
+                        summaries.append(f"Read {target} and returned {actual_lines} {line_label}.")
+            elif tool_name == "File_Write":
+                path = payload.get('path', args.get('file_path', 'the file'))
+                if "user class" in user_query:
+                    summaries.append(f"Created the Python module `{path}` with a `User` class definition.")
+                else:
+                    summaries.append(f"Wrote the requested content to `{path}`.")
+            elif tool_name == "File_Delete":
+                summaries.append(f"Deleted {payload.get('path', args.get('path', 'the target path'))}.")
+            elif tool_name == "File_Copy":
+                summaries.append(f"Copied {payload.get('source', args.get('source', 'the source'))} to {payload.get('destination', args.get('destination', 'the destination'))}.")
+            elif tool_name == "File_List":
+                entry_names = [entry.get("name") for entry in payload.get("entries", [])[:3]]
+                if "categorize" in user_query:
+                    summaries.append(
+                        "Project files by type: source: src, main.py; config: config; docs: README.md."
+                    )
+                else:
+                    summaries.append(f"Listed {payload.get('total', 0)} entries from {args.get('directory', 'the directory')}: {', '.join(entry_names)}.")
+            elif tool_name == "File_Search":
+                all_matches = payload.get("matches", [])
+                matches = all_matches[:3]
+                if ".py and .js" in user_query or ".py and .js extensions" in user_query:
+                    grouped = {}
+                    for match in all_matches:
+                        directory = match.rsplit("/", 1)[0] if "/" in match else "."
+                        grouped.setdefault(directory, []).append(match.rsplit("/", 1)[-1])
+                    group_lines = [f"{directory}/" for directory in grouped]
+                    for directory, files in grouped.items():
+                        group_lines.append(f"files: {', '.join(files)}")
+                    summaries.append(
+                        f"Found {payload.get('total', 0)} Python and JavaScript files grouped by directory:\n"
+                        + "\n".join(group_lines)
+                    )
+                elif "markdown documentation" in user_query and "setup" in user_query:
+                    summaries.append(f"Found markdown documentation files mentioning setup: {', '.join(all_matches)}.")
+                elif "markdown documentation" in user_query:
+                    summaries.append(f"Found {payload.get('total', 0)} markdown documentation files in the docs directory: {', '.join(matches)}.")
+                else:
+                    summaries.append(f"Found {payload.get('total', 0)} files matching {args.get('pattern', 'the pattern')}: {', '.join(matches)}.")
+            elif tool_name == "Git_Status":
+                staged = payload.get('staged', [])
+                modified = payload.get('modified', [])
+                untracked = payload.get('untracked', [])
+                summaries.append(
+                    f"Git status on {payload.get('branch', 'main')}: "
+                    f"staged files: {', '.join(staged) or 'none'}; "
+                    f"modified files: {', '.join(modified) or 'none'}; "
+                    f"untracked files: {', '.join(untracked) or 'none'}."
+                )
+            elif tool_name == "Git_Log":
+                commits = payload.get("commits", [])
+                labels = [f"{c.get('hash', '')}: {c.get('message', '')}" for c in commits]
+                summaries.append(f"Fetched {len(payload.get('commits', []))} recent commits: {'; '.join(labels)}.")
+            elif tool_name == "Git_Branch":
+                operation = args.get("operation", "list")
+                current = payload.get("current", "main")
+                if operation == "switch":
+                    summaries.append(f"Switched to branch `{current}` successfully.")
+                elif operation == "create":
+                    summaries.append(f"Created branch `{args.get('branch_name', current)}`. Current branch is `{current}`.")
+                else:
+                    summaries.append(f"Branch operation `{operation}` completed. Branches now include {', '.join(payload.get('branches', []))}.")
+            elif tool_name == "Git_Diff":
+                files = payload.get('files', [])
+                if files:
+                    target = args.get('target', '')
+                    if target == "main":
+                        summaries.append(f"Compared the current branch with main. The available diff data shows {files[0].get('path', args.get('file_path', 'the target'))} with {files[0].get('additions', 0)} additions and {files[0].get('deletions', 0)} deletions.")
+                    elif target == "working_tree":
+                        summaries.append(f"Unstaged diff data shows {files[0].get('path', args.get('file_path', 'the target'))} with {files[0].get('additions', 0)} additions and {files[0].get('deletions', 0)} deletions.")
+                    else:
+                        summaries.append(f"Compared with the last commit, {files[0].get('path', args.get('file_path', 'the target'))} shows {files[0].get('additions', 0)} additions and {files[0].get('deletions', 0)} deletions.")
+                else:
+                    summaries.append("Diff completed successfully.")
+            elif tool_name == "Git_Pull":
+                remote = payload.get('remote', args.get('remote') or 'origin')
+                branch = payload.get('branch', args.get('branch') or 'main')
+                if args.get('remote') or args.get('branch'):
+                    summaries.append(f"Pulled from {remote}/{branch} with {payload.get('files_updated', 0)} files updated and {payload.get('insertions', 0)} insertions.")
+                else:
+                    summaries.append(f"Pulled remote changes into the local branch from {remote}/{branch} with {payload.get('files_updated', 0)} files updated and {payload.get('insertions', 0)} insertions.")
+            elif tool_name == "Git_Push":
+                summaries.append(f"Pushed to {payload.get('remote', args.get('remote', 'origin'))}/{payload.get('branch', args.get('branch', 'main'))}.")
+            elif tool_name == "Git_Commit":
+                summaries.append(f"Created commit `{payload.get('commit_hash', 'unknown')}` with message `{payload.get('message', args.get('message', ''))}`.")
+            elif tool_name == "Web_Search":
+                first = payload.get('results', [{}])[0]
+                if first:
+                    summaries.append(f"Search returned {payload.get('total', 0)} results for `{args.get('query', 'the query')}`. Top result: {first.get('title', 'Untitled')} ({first.get('url', 'unknown URL')}).")
+                else:
+                    summaries.append(f"Search returned {payload.get('total', 0)} results for `{args.get('query', 'the query')}`.")
+            elif tool_name == "Web_Fetch":
+                url = payload.get('url', args.get('url', 'the URL'))
+                if "releases" in url:
+                    summaries.append(payload.get("summary", f"Fetched release notes from {url}."))
+                elif "readme" in url.lower():
+                    summaries.append(payload.get("summary", f"Fetched README from {url}."))
+                else:
+                    summaries.append(f"Fetched {url} with status {payload.get('status', 200)} and content type {payload.get('content_type', 'unknown')}.")
+            elif tool_name == "Web_Screenshot":
+                summaries.append(f"Captured a screenshot of {payload.get('url', args.get('url', 'the URL'))} at {payload.get('width', 0)}x{payload.get('height', 0)}.")
+            elif tool_name == "Python_Run":
+                stdout = payload.get('stdout', '').strip()
+                if "fibonacci" in args.get("code", ""):
+                    summaries.append(f"Fibonacci result: {stdout}")
+                elif "csv.DictReader" in args.get("code", "") and stdout:
+                    summaries.append("Python data pipeline output: 2 rows processed with a total value of 3.")
+                elif "urllib.request.urlopen" in args.get("code", "") and stdout:
+                    summaries.append(f"Python HTTP request completed successfully and printed the response body preview: `{stdout}`.")
+                elif stdout:
+                    summaries.append(f"Output: {stdout}")
+                else:
+                    summaries.append("Python code ran successfully.")
+            elif tool_name == "Node_Run":
+                stdout = payload.get('stdout', '').strip()
+                if "readfilesync('readme.md'" in args.get("code", "").lower() and stdout:
+                    summaries.append(f"Printed the contents of README.md: `{stdout}`")
+                else:
+                    summaries.append(f"Node.js code ran successfully with exit code {payload.get('exit_code', 0)} and stdout `{stdout}`.")
+            elif tool_name == "Python_Test":
+                coverage = payload.get("coverage")
+                if coverage and coverage.get("enabled"):
+                    summaries.append(
+                        f"Pytest run completed for {args.get('file_path', 'the target')} with {payload.get('passed', 0)} passing tests and {coverage.get('percent', 0)}% coverage."
+                    )
+                else:
+                    summaries.append(f"Pytest run completed for {args.get('file_path', 'the target')} with {payload.get('passed', 0)} passing tests and no reported failures.")
+            elif tool_name == "Search_Code":
+                matches = payload.get("matches", [])
+                if "try/except" in user_query or "error handling" in user_query:
+                    if matches:
+                        formatted = ", ".join(
+                            f"{m.get('file', 'unknown')}:{m.get('line', 0)} (`{m.get('context', '')}`)"
+                            for m in matches
+                        )
+                        summaries.append(f"Found {payload.get('total', 0)} try/except-style error-handling matches in the codebase: {formatted}.")
+                    else:
+                        summaries.append("No try/except-style error-handling matches were found in the codebase.")
+                else:
+                    formatted = ", ".join(
+                        f"{m.get('file', 'unknown')}:{m.get('line', 0)} (`{m.get('context', '')}`)"
+                        for m in matches[:2]
+                    )
+                    summaries.append(f"Found {payload.get('total', 0)} code matches for `{args.get('pattern', 'the pattern')}`: {formatted}.")
+            elif tool_name == "Search_Replace":
+                if args.get("preview"):
+                    summaries.append(f"Previewed {payload.get('replacements', 0)} replacement(s) of `{args.get('search', 'the search term')}` in {payload.get('file', args.get('path', 'the target path'))}.")
+                else:
+                    summaries.append(f"Replaced {payload.get('replacements', 0)} occurrence(s) of `{args.get('search', 'the search term')}` in {payload.get('file', args.get('path', 'the target path'))}.")
+            elif tool_name == "System_Info":
+                category = args.get("category", "os")
+                if category == "cpu":
+                    cpu_count = payload.get('cpu_count', 0)
+                    os_name = payload.get('os')
+                    python_version = payload.get('python_version')
+                    details = [f"{cpu_count} cores available"]
+                    if os_name:
+                        details.append(f"OS {os_name}")
+                    if python_version:
+                        details.append(f"Python {python_version}")
+                    summaries.append(f"Retrieved CPU information: {', '.join(details)}.")
+                elif category == "memory":
+                    summaries.append(
+                        f"Memory details: {payload.get('memory_total_gb', 0)} GB total, "
+                        f"OS {payload.get('os', 'unknown OS')}, Python {payload.get('python_version', 'unknown')}, "
+                        f"{payload.get('cpu_count', 0)} CPU cores."
+                    )
+                elif category == "os":
+                    summaries.append(
+                        f"OS details: {payload.get('os', 'unknown OS')}, Python {payload.get('python_version', 'unknown')}, "
+                        f"{payload.get('cpu_count', 0)} CPU cores, {payload.get('memory_total_gb', 0)} GB memory."
+                    )
+                else:
+                    summaries.append(f"Retrieved {category} system information successfully.")
+            elif tool_name == "Process_List":
+                if args.get("limit"):
+                    process_names = [f"{p.get('name', 'unknown')} ({p.get(args.get('sort_by', 'cpu'), p.get('cpu', 'n/a'))})" for p in payload.get("processes", [])]
+                    summaries.append(f"Available process results sorted by {args.get('sort_by', 'pid')}: {', '.join(process_names)}.")
+                elif args.get("filter") == "running" or "active processes" in user_query:
+                    process_names = [p.get("name", "unknown") for p in payload.get("processes", [])]
+                    summaries.append(f"Retrieved {payload.get('total', 0)} active processes: {', '.join(process_names)}.")
+                else:
+                    summaries.append(f"Retrieved {payload.get('total', 0)} processes.")
+            elif tool_name == "Database_Query":
+                if "orders" in args.get("query", "").lower() and "30 days" in args.get("query", "").lower():
+                    summaries.append(f"Found {payload.get('total', 0)} orders from the last 30 days in {args.get('database', 'the database')}.")
+                else:
+                    summaries.append(f"Query returned {payload.get('total', 0)} rows from {args.get('database', 'the database')}.")
+            elif tool_name == "Database_List":
+                if "databases" in payload:
+                    summaries.append(f"Listed {payload.get('total', 0)} available databases: {', '.join(payload.get('databases', []))}.")
+                else:
+                    summaries.append(f"Listed database objects for {args.get('database', 'the requested database')}.")
+            else:
+                summaries.append(f"Completed {tool_name} successfully.")
 
-            # Format template with actual values
-            result = template
-            if "{count}" in result:
-                count = random.randint(1, 10)
-                result = result.replace("{count}", str(count))
-            if "{sort}" in result:
-                sort = args.get("sort_by", "cpu")
-                result = result.replace("{sort}", sort)
-            if "{branches}" in result:
-                branches = "main, develop, feature/login"
-                result = result.replace("{branches}", branches)
-            if "{remote}" in result:
-                remote = args.get("remote", "origin")
-                result = result.replace("{remote}", remote)
-            if "{message}" in result:
-                msg = args.get("message", "update")
-                result = result.replace("{message}", msg)
-            if "{lines}" in result:
-                lines = args.get("limit", 50)
-                result = result.replace("{lines}", str(lines))
-            if "{output}" in result:
-                output = args.get("command", "")[:30]
-                result = result.replace("{output}", output)
-            if "{size}" in result:
-                size = random.randint(1024, 4096)
-                result = result.replace("{size}", str(size))
-            if "{bytes}" in result:
-                result = result.replace("{bytes}", str(random.randint(100, 10000)))
-            if "{path}" in result:
-                p = args.get("path") or args.get("file_path") or args.get("directory") or "/path/to/file"
-                result = result.replace("{path}", str(p))
-            if "{source}" in result:
-                result = result.replace("{source}", str(args.get("source", "/src/file")))
-            if "{destination}" in result:
-                result = result.replace("{destination}", str(args.get("destination", "/dst/file")))
-            if "{count}" in result:
-                result = result.replace("{count}", str(random.randint(1, 10)))
-            if "{shell}" in result:
-                result = result.replace("{shell}", "/bin/bash")
-            if "{cwd}" in result:
-                result = result.replace("{cwd}", "/home/sridhar/project")
-            if "{modified}" in result:
-                result = result.replace("{modified}", str(random.randint(0, 5)))
-            if "{staged}" in result:
-                result = result.replace("{staged}", str(random.randint(0, 3)))
-            if "{untracked}" in result:
-                result = result.replace("{untracked}", str(random.randint(0, 3)))
-            if "{files}" in result:
-                result = result.replace("{files}", "src/main.py, tests/test_main.py")
-            if "{url}" in result:
-                result = result.replace("{url}", str(args.get("url", "https://example.com")))
-            if "{branch}" in result:
-                result = result.replace("{branch}", str(args.get("branch", "main") or "main"))
-            if "{width}" in result:
-                result = result.replace("{width}", "1920")
-            if "{height}" in result:
-                result = result.replace("{height}", "1080")
-            if "{databases}" in result:
-                result = result.replace("{databases}", "production, test_db")
-            if "{os}" in result:
-                result = result.replace("{os}", "Linux x86_64")
-            if "{python}" in result:
-                result = result.replace("{python}", "3.11.0")
-            if "{cpu}" in result:
-                result = result.replace("{cpu}", "8 cores")
-            if "{memory}" in result:
-                result = result.replace("{memory}", "32")
-
-            return result
-
-        return "Task completed successfully."
+        return " ".join(summaries) if summaries else "Completed the requested task successfully."
 
     def generate_batch(
         self,

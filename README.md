@@ -56,6 +56,23 @@ ls -la output/
 
 ## Complete Usage Guide
 
+### Dataset Verification With Ollama
+
+You can verify generated JSONL rows with a local Ollama model and export a CSV of bad samples.
+
+```bash
+pip install -r requirements.txt
+streamlit run streamlit_verifier_app.py
+```
+
+What the verifier does:
+- loads a JSONL file from `output/` or an uploaded file
+- sends each row to a local Ollama model for review
+- checks whether the tool call, tool result, and final answer are consistent
+- writes a CSV with row number and review comment for incorrect rows
+
+Generated CSV files are saved under `output/verifications/`.
+
 ### Option A: Quick Generation (Single Command)
 
 ```bash
