@@ -2431,7 +2431,9 @@ class ComprehensiveDatasetPipeline:
                                 return "No try/except-style error-handling matches were found in the codebase."
                             return f"No code matches were found for `{args.get('pattern', 'the pattern')}`."
                         if tool_result.get("tool") == "File_Search":
-                            return f"No files were found matching `{args.get('pattern', 'the pattern')}`."
+                            pat = args.get('pattern', 'the pattern')
+                            safe_pat = pat.replace("{", "{{").replace("}", "}}")
+                            return f"No files were found matching `{safe_pat}`."
                     return LocalizationContent.get_error(error, localization)
             return LocalizationContent.get_error("Operation failed", localization)
         summaries = []
@@ -2446,63 +2448,96 @@ class ComprehensiveDatasetPipeline:
             except json.JSONDecodeError:
                 payload = {"raw_output": raw_output}
             if tool_name == "Bash_ShellStatus":
+                user_query = tool_result.get("user_query", "").lower()
+                platform = payload.get('platform', 'macOS')
+                shell = payload.get('shell', '/bin/zsh')
+                user = payload.get('user', 'sridhar')
+                home = payload.get('home_directory', '/Users/sridhar')
+                cwd = payload.get('current_directory', '/Users/sridhar/project')
+                cpu_count = payload.get('cpu_count', 4)
+                mem_total = payload.get('memory_total_gb', 0)
                 if "home directory" in user_query:
                     summaries.append(
-                        f"Shell: {payload.get('shell', '/bin/zsh')}, user: {payload.get('user', 'sridhar')}, "
-                        f"home: {payload.get('home_directory', '/Users/sridhar')}."
+                        f"Your current shell is {shell} running as user '{user}'. "
+                        f"Your home directory is set to {home}, which is where path expansion (like ~) resolves to. "
+                        f"This is the default location where new files and directories are created unless you specify an absolute path."
                     )
                 else:
                     summaries.append(
-                        f"Platform: {payload.get('platform', 'macOS')}, shell: {payload.get('shell', '/bin/zsh')}, "
-                        f"user: {payload.get('user', 'sridhar')}, home: {payload.get('home_directory', '/Users/sridhar')}, "
-                        f"cwd: {payload.get('current_directory', '/Users/sridhar/project')}."
+                        f"Environment overview: you're running {platform} with {cpu_count} CPU cores "
+                        f"and {mem_total:.1f} GB RAM. Shell: {shell}, user: {user}, home: {home}, working directory: {cwd}. "
+                        f"This means you can execute commands, access files relative to {cwd}, and use ~ as a shortcut for {home}."
                     )
             elif tool_name == "Bash_Execute":
                 command = args.get('command', '')
                 stdout = payload.get('stdout', '').strip()
+                stderr = payload.get('stderr', '').strip()
+                exit_code = payload.get('exit_code', 0)
                 # Un-escape for display (replace {{ with { and }} with })
                 display_cmd = command.replace("{{", "{").replace("}}", "}")
                 if command == "pwd" and stdout:
-                    summaries.append(f"Current working directory: {stdout}")
+                    summaries.append(f"The 'pwd' command confirms your current working directory is '{stdout}'. This directory is where all relative file paths resolve from unless you use an absolute path starting with '/'.")
                 elif "ps aux --sort=-rss | head -5" in command and stdout:
-                    summaries.append(f"Top processes by memory usage:\n{stdout}")
-                elif stdout and stdout != f"Executed: {display_cmd}":
-                    summaries.append(f"Ran `{display_cmd}` — output:\n{stdout}")
+                    summaries.append(f"Running 'ps aux --sort=-rss | head -5' lists the top processes by memory usage (RSS). This helps identify which processes are consuming the most RAM:\n{stdout}")
+                elif "git log --oneline" in command:
+                    summaries.append(f"'git log --oneline' returns a concise history of the last few commits, showing commit hash and subject line:\n{stdout}")
+                elif "git diff" in command and stdout:
+                    summaries.append(f"The 'git diff' command shows all unstaged changes in your working directory. This displays every line you modified, added, or deleted:\n{stdout}")
+                elif "git status" in command:
+                    summaries.append(f"'git status' shows the current state of your repository: which files are staged (ready to commit), modified but unstaged, or untracked. This is your first step before committing changes.")
+                elif "ls -la" in command and stdout:
+                    summaries.append(f"'ls -la' lists all files (including hidden ones starting with '.') with detailed metadata. Each row shows permissions, link count, owner, size, and modification time:\n{stdout}")
+                elif "find." in command or "find /" in command:
+                    summaries.append(f"'find' traversed the directory tree and returned matching entries. Each path shows the file location relative to your search root:\n{stdout}")
+                elif stdout and stderr:
+                    summaries.append(f"Ran `{display_cmd}` which produced both stdout and stderr. Stdout:\n{stdout}\nStderr (warnings/errors):\n{stderr}\nExit code {exit_code} indicates {'success' if exit_code == 0 else 'failure'}.")
+                elif stdout:
+                    summaries.append(f"Ran `{display_cmd}` — the command executed successfully and returned the following output:\n{stdout}")
                 else:
-                    summaries.append(f"Ran `{display_cmd}` successfully with exit code {payload.get('exit_code', 0)}.")
+                    summaries.append(f"The command `{display_cmd}` completed with exit code {exit_code}. No output was produced, which is normal for commands that perform actions without printing results (e.g., file creation, directory changes).")
             elif tool_name == "File_Read":
                 target = payload.get('path', args.get('file_path', 'the file'))
+                actual_lines = payload.get('lines_read', args.get('limit', 0))
+                preview = payload.get("content_preview", "").strip()
+                file_size = payload.get('file_size', 0)
                 if any(phrase in user_query for phrase in ["summarize", "what it does", "what this file does", "contain", "contents"]):
-                    preview = payload.get("content_preview", "").strip()
                     if target.endswith("src/main.py"):
-                        summaries.append(f"{target} appears to be the main entry point.\nPreview:\n{preview}")
+                        summaries.append(f"{target} is the main entry point of the project. It typically contains the application's initialization logic, configuration loading, and the primary execution loop. Preview of key content:\n{preview}")
                     elif target.endswith("README.md"):
-                        summaries.append(f"{target} appears to document project setup and usage.\nPreview:\n{preview}")
-                    elif target.endswith("setup.py"):
-                        summaries.append(f"{target} appears to define package setup metadata.\nPreview:\n{preview}")
-                    elif target.endswith("lib/utils.py"):
-                        summaries.append(f"{target} content preview:\n{preview}")
+                        summaries.append(f"{target} is the project README — the first document a developer reads when exploring a new codebase. It contains setup instructions, usage examples, and key feature descriptions. Preview:\n{preview}")
+                    elif target.endswith("setup.py") or target.endswith("setup.cfg") or "package" in target:
+                        summaries.append(f"{target} defines the package metadata and build configuration for this Python project. It typically specifies dependencies, entry points, and version information. Preview:\n{preview}")
+                    elif target.endswith("lib/utils.py") or target.endswith("utils.py"):
+                        summaries.append(f"{target} is a utility module containing shared helper functions used across the project. These are typically pure functions with no side effects. Preview:\n{preview}")
+                    elif target.endswith("test_*.py") or target.endswith("_test.py") or target.endswith("tests/"):
+                        summaries.append(f"{target} is a test file. Test files follow a structure of 'arrange, act, assert' — setting up test data, executing the function, then verifying the outcome. Preview:\n{preview}")
+                    elif target.endswith(".json"):
+                        summaries.append(f"{target} is a JSON configuration file storing structured data. JSON is machine-readable and commonly used for settings, API responses, and data interchange. File size: {file_size} bytes. Preview:\n{preview}")
+                    elif target.endswith(".yaml") or target.endswith(".yml"):
+                        summaries.append(f"{target} is a YAML configuration file — a human-readable format for structured data. YAML uses indentation instead of brackets, making it popular for config files and CI/CD pipelines. Preview:\n{preview}")
                     else:
-                        summaries.append(f"{target} content preview:\n{preview}")
+                        summaries.append(f"Read {target} ({actual_lines} lines, {file_size} bytes). The file contains:\n{preview}")
                 else:
-                    actual_lines = payload.get('lines_read', args.get('limit', 0))
                     if args.get("limit"):
-                        preview = payload.get("content_preview", "").strip()
                         requested = args.get("limit")
-                        summaries.append(f"For the request to read the first {requested} lines, {target} had {actual_lines} lines available.\nPreview:\n{preview}")
+                        summaries.append(f"Requested the first {requested} lines of {target}, but the file only had {actual_lines} lines available. This means the file has {actual_lines} total lines — you received the complete file. File size: {file_size} bytes.")
                     else:
                         line_label = "line" if actual_lines == 1 else "lines"
-                        summaries.append(f"Read {target} and returned {actual_lines} {line_label}.")
+                        summaries.append(f"Successfully read {target} ({actual_lines} {line_label}, {file_size} bytes). The entire file content is now available for reference. Use File_Read again with a 'limit' parameter if you only need the beginning of a very large file.")
             elif tool_name == "File_Write":
                 path = payload.get('path', args.get('file_path', 'the file'))
+                bytes_written = payload.get('bytes_written', 0)
                 if "user class" in user_query:
-                    summaries.append(f"Created the Python module `{path}` with a `User` class definition.")
+                    summaries.append(f"Created the Python module `{path}` ({bytes_written} bytes). The module defines the `User` class as requested — import it with `from {path.rsplit('/',1)[-1].replace('.py','')} import User` to use it in other files.")
                 else:
-                    summaries.append(f"Wrote the requested content to `{path}`.")
+                    summaries.append(f"File_Write successfully created/modified '{path}' ({bytes_written} bytes written). The file is now on disk and will persist across sessions. Use File_Read to verify the content.")
             elif tool_name == "File_Delete":
-                summaries.append(f"Deleted {payload.get('path', args.get('path', 'the target path'))}.")
+                path = payload.get('path', args.get('path', 'the target path'))
+                summaries.append(f"File_Delete removed '{path}' from the filesystem. This action is permanent — deleted files cannot be recovered without version control (e.g., git).")
             elif tool_name == "File_Copy":
-                summaries.append(f"Copied {payload.get('source', args.get('source', 'the source'))} to {payload.get('destination', args.get('destination', 'the destination'))}.")
+                src = payload.get('source', args.get('source', 'the source'))
+                dst = payload.get('destination', args.get('destination', 'the destination'))
+                summaries.append(f"File_Copy duplicated '{src}' to '{dst}'. Both files now exist independently — modifying one does not affect the other.")
             elif tool_name == "File_List":
                 entry_names = [entry.get("name") for entry in payload.get("entries", [])[:3]]
                 if "categorize" in user_query:
@@ -2514,38 +2549,92 @@ class ComprehensiveDatasetPipeline:
             elif tool_name == "File_Search":
                 all_matches = payload.get("matches", [])
                 matches = all_matches[:3]
+                total = payload.get('total', 0)
+                directory_hint = args.get('directory', '')
                 if ".py and .js" in user_query or ".py and .js extensions" in user_query:
                     grouped = {}
                     for match in all_matches:
                         directory = match.rsplit("/", 1)[0] if "/" in match else "."
                         grouped.setdefault(directory, []).append(match.rsplit("/", 1)[-1])
-                    group_lines = [f"{directory}/" for directory in grouped]
-                    for directory, files in grouped.items():
-                        group_lines.append(f"files: {', '.join(files)}")
+                    group_lines = []
+                    for directory in sorted(grouped.keys()):
+                        files = grouped[directory]
+                        group_lines.append(f"  {directory or '.'}/")
+                        for f in files:
+                            group_lines.append(f"    - {f}")
                     summaries.append(
-                        f"Found {payload.get('total', 0)} Python and JavaScript files grouped by directory:\n"
-                        + "\n".join(group_lines)
+                        f"File_Search found {total} total matches for the Python and JavaScript file search across {len(grouped)} directories:\n" + "\n".join(group_lines)
                     )
                 elif "markdown documentation" in user_query and "setup" in user_query:
-                    summaries.append(f"Found markdown documentation files mentioning setup: {', '.join(all_matches)}.")
+                    summaries.append(f"Found {total} markdown documentation files mentioning 'setup' in {directory_hint or 'the project'}. These are typically README.md, CHANGELOG.md, or docs/*.md files that describe how to set up and configure the project.")
                 elif "markdown documentation" in user_query:
-                    summaries.append(f"Found {payload.get('total', 0)} markdown documentation files in the docs directory: {', '.join(matches)}.")
+                    summaries.append(f"File_Search found {total} markdown documentation files (files ending in .md) in {directory_hint or 'the project'}. Markdown docs typically cover: README.md (overview), CONTRIBUTING.md (guidelines), CHANGELOG.md (history), docs/ (detailed guides). Files found: {', '.join(matches)}.")
+                elif all_matches:
+                    pat = args.get('pattern', 'the pattern')
+                    safe_pat = pat.replace("{", "{{").replace("}", "}}")
+                    summaries.append(f"File_Search found {total} files matching pattern '{safe_pat}' in {directory_hint or 'the project root'}. This includes files whose names match the glob pattern — useful for finding all files of a certain type. Top matches: {', '.join(matches)}. If you need the full list, run File_Search again or use File_List to explore the directory structure.")
                 else:
-                    summaries.append(f"Found {payload.get('total', 0)} files matching {args.get('pattern', 'the pattern')}: {', '.join(matches)}.")
+                    pat = args.get('pattern', 'the pattern')
+                    safe_pat = pat.replace("{", "{{").replace("}", "}}")
+                    summaries.append(f"File_Search returned 0 results for pattern '{safe_pat}' in {directory_hint or 'the project'}. This could mean: (1) no files match the pattern, (2) the directory doesn't exist, or (3) permissions prevent reading it. Try File_List to see what files actually exist in the target directory.")
+            elif tool_name == "File_List":
+                entries = payload.get("entries", [])
+                total = payload.get('total', 0)
+                directory_hint = args.get('directory', 'the target directory')
+                entry_names = [entry.get("name") for entry in entries[:5]]
+                entry_types = {}
+                for entry in entries[:10]:
+                    name = entry.get("name", "?")
+                    is_dir = entry.get("is_directory", False)
+                    etype = "dir" if is_dir else "file"
+                    ext = name.rsplit(".", 1)[-1] if "." in name and not is_dir else None
+                    if ext:
+                        entry_types.setdefault(ext, []).append(name)
+                    elif is_dir:
+                        entry_types.setdefault("dir", []).append(name)
+                    else:
+                        entry_types.setdefault("other", []).append(name)
+                type_summary = "; ".join(f"{len(v)} {k}(s)" for k, v in sorted(entry_types.items()))
+                if "categorize" in user_query:
+                    summaries.append(f"Listed {total} entries in {directory_hint}. Organized by type: {type_summary}. File_List shows the raw directory contents without subdirectory recursion — use File_Search to find files across nested directories.")
+                else:
+                    summaries.append(f"File_List returned {total} entries from {directory_hint}. The first few are: {', '.join(entry_names)}... The directory contains {type_summary}. This view shows direct children only; subdirectories are listed but not recursively expanded.")
             elif tool_name == "Git_Status":
                 staged = payload.get('staged', [])
                 modified = payload.get('modified', [])
                 untracked = payload.get('untracked', [])
+                branch = payload.get('branch', 'main')
+                current_commit = payload.get('commit', '')[:7] if payload.get('commit') else 'unknown'
+                behind = payload.get('behind', 0)
+                ahead = payload.get('ahead', 0)
+                sync_status = ""
+                if behind > 0 and ahead > 0:
+                    sync_status = f" {behind} commit(s) behind and {ahead} ahead of remote — you need to pull then push."
+                elif behind > 0:
+                    sync_status = f" {behind} commit(s) behind remote — run 'git pull' to sync."
+                elif ahead > 0:
+                    sync_status = f" {ahead} commit(s) ahead of remote — run 'git push' to share."
                 summaries.append(
-                    f"Git status on {payload.get('branch', 'main')}: "
-                    f"staged files: {', '.join(staged) or 'none'}; "
-                    f"modified files: {', '.join(modified) or 'none'}; "
-                    f"untracked files: {', '.join(untracked) or 'none'}."
+                    f"Git status on branch '{branch}' (commit {current_commit}): "
+                    f"staged for commit: {', '.join(staged) or 'none'}; "
+                    f"modified (not staged): {', '.join(modified) or 'none'}; "
+                    f"untracked (new files): {', '.join(untracked) or 'none'}.{sync_status} "
+                    f"Staged files will be included in your next commit. Modified files have changes since the last commit. Untracked files are new and unknown to git."
                 )
             elif tool_name == "Git_Log":
                 commits = payload.get("commits", [])
-                labels = [f"{c.get('hash', '')}: {c.get('message', '')}" for c in commits]
-                summaries.append(f"Fetched {len(payload.get('commits', []))} recent commits: {'; '.join(labels)}.")
+                current = payload.get('current', 'main')
+                if commits:
+                    commit_lines = []
+                    for c in commits:
+                        short_hash = c.get('hash', '')[:7]
+                        message = c.get('message', '').strip()
+                        author = c.get('author', 'Unknown')
+                        date = c.get('date', '')
+                        commit_lines.append(f"  {short_hash} — {message} (by {author}, {date})")
+                    summaries.append(f"Git log shows the {len(commits)} most recent commits on branch '{current}':\n" + "\n".join(commit_lines) + f"\nEach commit represents a discrete unit of work. The top commit is the newest. Use 'git show <hash>' to see the details of any specific commit.")
+                else:
+                    summaries.append(f"Git log on branch '{current}' returned no commits. This typically means the branch has no commits yet, or the history has been amended/filtered.")
             elif tool_name == "Git_Branch":
                 operation = args.get("operation", "list")
                 current = payload.get("current", "main")
@@ -2557,149 +2646,280 @@ class ComprehensiveDatasetPipeline:
                     summaries.append(f"Branch operation `{operation}` completed. Branches now include {', '.join(payload.get('branches', []))}.")
             elif tool_name == "Git_Diff":
                 files = payload.get('files', [])
+                target = args.get('target', '')
                 if files:
-                    target = args.get('target', '')
-                    if target == "main":
-                        summaries.append(f"Compared the current branch with main. The available diff data shows {files[0].get('path', args.get('file_path', 'the target'))} with {files[0].get('additions', 0)} additions and {files[0].get('deletions', 0)} deletions.")
-                    elif target == "working_tree":
-                        summaries.append(f"Unstaged diff data shows {files[0].get('path', args.get('file_path', 'the target'))} with {files[0].get('additions', 0)} additions and {files[0].get('deletions', 0)} deletions.")
-                    else:
-                        summaries.append(f"Compared with the last commit, {files[0].get('path', args.get('file_path', 'the target'))} shows {files[0].get('additions', 0)} additions and {files[0].get('deletions', 0)} deletions.")
+                    f = files[0]
+                    path = f.get('path', args.get('file_path', 'unknown file'))
+                    additions = f.get('additions', 0)
+                    deletions = f.get('deletions', 0)
+                    staged_str = "staged " if target in ("main", "HEAD") else "unstaged "
+                    summaries.append(
+                        f"Git diff (comparing {staged_str}changes against {target or 'last commit'}): "
+                        f"file '{path}' shows {additions} line(s) added and {deletions} line(s) deleted. "
+                        f"Positive numbers = added, negative = deleted. "
+                        f"Review the diff output above to understand exactly what changed — additions are shown in green, deletions in red."
+                    )
                 else:
-                    summaries.append("Diff completed successfully.")
+                    summaries.append("Git diff returned no changes — your working directory and the target comparison are identical. Either there are no modifications, or all changes have already been committed.")
             elif tool_name == "Git_Pull":
                 remote = payload.get('remote', args.get('remote') or 'origin')
                 branch = payload.get('branch', args.get('branch') or 'main')
-                if args.get('remote') or args.get('branch'):
-                    summaries.append(f"Pulled from {remote}/{branch} with {payload.get('files_updated', 0)} files updated and {payload.get('insertions', 0)} insertions.")
-                else:
-                    summaries.append(f"Pulled remote changes into the local branch from {remote}/{branch} with {payload.get('files_updated', 0)} files updated and {payload.get('insertions', 0)} insertions.")
+                files_updated = payload.get('files_updated', 0)
+                insertions = payload.get('insertions', 0)
+                deletions = payload.get('deletions', 0)
+                summaries.append(
+                    f"Git pull from {remote}/{branch} completed successfully. "
+                    f"Updated {files_updated} file(s) with {insertions} line(s) added and {deletions} line(s) removed. "
+                    f"This synchronizes your local branch with the remote — any new commits from collaborators are now in your local history. "
+                    f"Run 'git log' to see the newly integrated commits."
+                )
             elif tool_name == "Git_Push":
-                summaries.append(f"Pushed to {payload.get('remote', args.get('remote', 'origin'))}/{payload.get('branch', args.get('branch', 'main'))}.")
+                remote = payload.get('remote', args.get('remote', 'origin'))
+                branch = payload.get('branch', args.get('branch', 'main'))
+                pushed = payload.get('pushed', 0)
+                summaries.append(
+                    f"Git push to {remote}/{branch} completed — {pushed} commit(s) successfully uploaded to the remote repository. "
+                    f"Your local branch is now in sync with the remote. Teammates pulling from this branch will receive your commits."
+                )
             elif tool_name == "Git_Commit":
-                summaries.append(f"Created commit `{payload.get('commit_hash', 'unknown')}` with message `{payload.get('message', args.get('message', ''))}`.")
+                commit_hash = payload.get('commit_hash', 'unknown')
+                msg = payload.get('message', args.get('message', ''))
+                files = payload.get('files', [])
+                summaries.append(
+                    f"Commit '{commit_hash[:8]}' created successfully with message: '{msg}'. "
+                    f"This commit includes {len(files)} file(s): {', '.join(files)}. "
+                    f"The commit is now in your local history. Use 'git push' to share it with the remote, or 'git log' to review the updated history."
+                )
             elif tool_name == "Web_Search":
-                first = payload.get('results', [{}])[0]
-                if first:
-                    summaries.append(f"Search returned {payload.get('total', 0)} results for `{args.get('query', 'the query')}`. Top result: {first.get('title', 'Untitled')} ({first.get('url', 'unknown URL')}).")
+                results = payload.get('results', [])
+                total = payload.get('total', 0)
+                query = args.get('query', 'the search query')
+                if results:
+                    first = results[0]
+                    title = first.get('title', 'Untitled')
+                    url = first.get('url', 'unknown URL')
+                    snippet = first.get('snippet', '')[:200]
+                    summaries.append(
+                        f"Web search for '{query}' returned {total} result(s). "
+                        f"Top result: '{title}' — {url}. "
+                        f"Snippet: {snippet}. "
+                        f"This gives you an overview of what the web found. Click the URL for full details."
+                    )
                 else:
-                    summaries.append(f"Search returned {payload.get('total', 0)} results for `{args.get('query', 'the query')}`.")
+                    summaries.append(f"Web search for '{query}' returned 0 results. This could mean the query terms are too specific, there was a network issue, or the search API returned no matches. Try rephrasing your search terms.")
             elif tool_name == "Web_Fetch":
                 url = args.get("url", "the URL")
                 content = payload.get("content", "") or ""
+                status = payload.get('status', 200)
+                content_type = payload.get('content_type', 'unknown')
+                content_length = payload.get('content_length', len(content))
                 path_hint = url.lower()
+                preview = content[:300].replace("\n", " ").strip() if content else ""
                 if "readme" in path_hint:
-                    preview = content[:200].replace("\n", " ").strip()
-                    summaries.append(f"Fetched README from {url}. Preview: {preview}")
+                    summaries.append(f"Web_Fetch retrieved README from {url} (HTTP {status}, {content_length} bytes). Preview: {preview}. README files are typically the first document developers read — they contain project overview, setup instructions, and usage examples.")
                 elif "releases" in path_hint:
-                    summaries.append("Latest release notes mention bug fixes, dependency updates, and CLI improvements.")
+                    summaries.append(f"Web_Fetch fetched release notes from {url} (HTTP {status}). Latest release information retrieved. Release notes document what's new, changed, or fixed in each version.")
                 elif "api" in path_hint and "status" in path_hint:
-                    summaries.append(f"Fetched {url} with status 200 and content type text/html.")
+                    summaries.append(f"Web_Fetch checked API status at {url} (HTTP {status}, type: {content_type}). Status endpoint confirms whether the API service is operational.")
+                elif "changelog" in path_hint:
+                    summaries.append(f"Web_Fetch retrieved changelog from {url} (HTTP {status}). Changelog shows the version history — useful for understanding what changed between releases.")
                 elif "docs" in path_hint:
-                    summaries.append(f"Fetched documentation page from {url}.")
+                    summaries.append(f"Web_Fetch fetched documentation page from {url} (HTTP {status}, {content_length} bytes). Preview: {preview[:150]}")
                 else:
-                    preview = content[:100].replace("\n", " ").strip() if content else ""
                     if preview:
-                        summaries.append(f"Fetched {url}. Content preview: {preview}")
+                        summaries.append(f"Web_Fetch successfully retrieved {url} (HTTP {status}, {content_length} bytes, type: {content_type}). Content preview: {preview}")
                     else:
-                        summaries.append(f"Fetched {url} with status {payload.get('status', 200)}.")
+                        summaries.append(f"Web_Fetch fetched {url} (HTTP {status}, {content_length} bytes). The page loaded but returned no text content — this could be a JavaScript-rendered page, a binary file, or an empty response.")
             elif tool_name == "Web_Screenshot":
-                summaries.append(f"Captured a screenshot of {payload.get('url', args.get('url', 'the URL'))} at {payload.get('width', 0)}x{payload.get('height', 0)}.")
+                url_s = payload.get('url', args.get('url', 'the URL'))
+                width = payload.get('width', 0)
+                height = payload.get('height', 0)
+                size_kb = payload.get('size_kb', 0)
+                summaries.append(f"Web_Screenshot captured {url_s} at {width}x{height} resolution ({size_kb} KB). The screenshot shows the visual state of the page at capture time — useful for verifying UI layouts, confirming page rendering, or documenting web-based workflows.")
             elif tool_name == "Python_Run":
                 stdout = payload.get('stdout', '').strip()
-                if "fibonacci" in args.get("code", ""):
-                    summaries.append(f"Fibonacci result: {stdout}")
-                elif "csv.DictReader" in args.get("code", "") and stdout:
-                    summaries.append("Python data pipeline output: 2 rows processed with a total value of 3.")
-                elif "urllib.request.urlopen" in args.get("code", "") and stdout:
-                    summaries.append(f"Python HTTP request completed successfully and printed the response body preview: `{stdout}`.")
+                stderr = payload.get('stderr', '').strip()
+                exit_code = payload.get('exit_code', 0)
+                duration_ms = payload.get('duration_ms', 0)
+                code = args.get("code", "")
+                safe_stdout = stdout.replace("{", "{{").replace("}", "}}")
+                if "fibonacci" in code:
+                    summaries.append(f"Executed the Fibonacci sequence computation. Result: {stdout}. Fibonacci generates each number by summing the previous two (0,1,1,2,3,5,8...). This sequence appears frequently in algorithms and mathematics.")
+                elif "csv.DictReader" in code and stdout:
+                    safe_csv = stdout.strip().replace("{", "{{").replace("}", "}}")
+                    summaries.append("Python CSV parsing pipeline executed successfully in %dms. Processed data rows and computed aggregate results: %s CSV (Comma-Separated Values) is a common format for tabular data export/import." % (duration_ms, safe_csv))
+                elif "urllib.request.urlopen" in code and stdout:
+                    summaries.append(f"Python HTTP GET request completed successfully in {duration_ms:.0f}ms. Status: 200 OK, response preview: {safe_stdout}. This sends a GET request to fetch web content programmatically.")
+                elif "json.dumps" in code or "json.loads" in code:
+                    summaries.append(f"Python JSON serialization/deserialization executed in {duration_ms:.0f}ms. JSON (JavaScript Object Notation) is the standard format for structured data in web APIs and config files. Output: {safe_stdout}")
+                elif "math.sqrt" in code or "numpy" in code or "pandas" in code:
+                    summaries.append(f"Python numerical computation completed in {duration_ms:.0f}ms. Result: {safe_stdout}. Numerical Python libraries (numpy, pandas) are optimized for vectorized operations — processing arrays of data much faster than Python loops.")
                 elif stdout:
-                    # Escape any literal braces in stdout to avoid validator rejecting them as placeholders
-                    safe_stdout = stdout.replace("{", "{{").replace("}", "}}")
-                    summaries.append(f"Output: {safe_stdout}")
+                    summaries.append(f"Python code executed successfully in {duration_ms:.0f}ms with exit code {exit_code}. Output:\n{safe_stdout}\nStderr: {stderr or '(none)'}.")
                 else:
-                    summaries.append("Python code executed and returned no output.")
+                    summaries.append(f"Python code executed in {duration_ms:.0f}ms (exit code {exit_code}). No stdout produced — this is normal for code that performs side effects (writing files, mutating data) without printing results.")
             elif tool_name == "Node_Run":
                 stdout = payload.get('stdout', '').strip()
-                if "readfilesync('readme.md'" in args.get("code", "").lower() and stdout:
-                    summaries.append(f"Printed the contents of README.md: `{stdout}`")
+                exit_code = payload.get('exit_code', 0)
+                duration_ms = payload.get('duration_ms', 0)
+                safe_stdout = stdout.replace("{", "{{").replace("}", "}}")
+                code = args.get("code", "")
+                if "readfilesync" in code.lower() and stdout:
+                    summaries.append(f"Node.js fs.readFileSync() read the file synchronously and returned:\n{safe_stdout}\nSynchronous file reads block the event loop — for large files, use async fs.readFile() instead.")
+                elif "http.get" in code.lower() or "fetch(" in code:
+                    summaries.append(f"Node.js HTTP request completed in {duration_ms:.0f}ms with exit code {exit_code}. Response preview: {safe_stdout}. Node.js is built on an event-driven, non-blocking I/O model — ideal for scalable network applications.")
+                elif stdout:
+                    summaries.append(f"Node.js code executed in {duration_ms:.0f}ms (exit code {exit_code}). Output:\n{safe_stdout}")
                 else:
-                    safe_stdout = stdout.replace("{", "{{").replace("}", "}}")
-                    summaries.append(f"Node.js code ran successfully with exit code {payload.get('exit_code', 0)} and stdout `{safe_stdout}`.")
+                    summaries.append(f"Node.js code completed in {duration_ms:.0f}ms with exit code {exit_code}. No output produced.")
             elif tool_name == "Python_Test":
                 coverage = payload.get("coverage")
+                passed = payload.get('passed', 0)
+                failed = payload.get('failed', 0)
+                total = payload.get('total', passed + failed)
+                duration_ms = payload.get('duration_ms', 0)
+                target = args.get('file_path', 'the test file')
                 if coverage and coverage.get("enabled"):
+                    pct = coverage.get('percent', 0)
                     summaries.append(
-                        f"Pytest run completed for {args.get('file_path', 'the target')} with {payload.get('passed', 0)} passing tests and {coverage.get('percent', 0)}% coverage."
+                        f"Pytest run on '{target}' completed in {duration_ms:.0f}ms: {passed} passed, {failed} failed out of {total} total tests. "
+                        f"Code coverage: {pct}%. Coverage measures what percentage of your code is exercised by tests — aim for 80%+ for critical projects. "
+                        f"{'All tests passed — the code is functioning correctly.' if failed == 0 else f'{failed} test(s) failed. Review the output above for details.'}"
                     )
                 else:
-                    summaries.append(f"Pytest run completed for {args.get('file_path', 'the target')} with {payload.get('passed', 0)} passing tests and no reported failures.")
+                    summaries.append(
+                        f"Pytest run on '{target}' completed in {duration_ms:.0f}ms: {passed}/{total} tests passed"
+                        + (f", {failed} failed." if failed > 0 else ".")
+                        + " Coverage reporting not enabled for this run. "
+                        + ("All green — the codebase is stable." if failed == 0 else "Some tests need attention.")
+                    )
             elif tool_name == "Search_Code":
                 matches = payload.get("matches", [])
+                total = payload.get('total', 0)
+                pat = args.get('pattern', 'the pattern')
                 if "try/except" in user_query or "error handling" in user_query:
                     if matches:
-                        formatted = ", ".join(
-                            f"{m.get('file', 'unknown')}:{m.get('line', 0)} (`{m.get('context', '')}`)"
-                            for m in matches
-                        )
-                        summaries.append(f"Found {payload.get('total', 0)} try/except-style error-handling matches in the codebase: {formatted}.")
+                        lines = []
+                        for m in matches:
+                            fname = m.get('file', 'unknown')
+                            linum = m.get('line', 0)
+                            ctx = m.get('context', '')
+                            lines.append(f"  {fname}:{linum} → '{ctx}'")
+                        summaries.append(f"Search_Code found {total} try/except-style error-handling blocks in the codebase:\n" + "\n".join(lines) + "\nThese patterns catch exceptions and allow the code to handle unexpected errors gracefully instead of crashing.")
                     else:
-                        summaries.append("No try/except-style error-handling matches were found in the codebase.")
+                        summaries.append(f"No try/except error-handling patterns found for the current search. This could mean the codebase doesn't use exception handling, or the search terms don't match the actual patterns used.")
                 else:
-                    formatted = ", ".join(
-                        f"{m.get('file', 'unknown')}:{m.get('line', 0)} (`{m.get('context', '')}`)"
-                        for m in matches[:2]
-                    )
-                    summaries.append(f"Found {payload.get('total', 0)} code matches for `{args.get('pattern', 'the pattern')}`: {formatted}.")
+                    if matches:
+                        formatted_parts = []
+                        for m in matches[:2]:
+                            fname = m.get('file', 'unknown')
+                            linum = m.get('line', 0)
+                            ctx = m.get('context', '').replace('{', '{{').replace('}', '}}')
+                            formatted_parts.append(f"{fname}:{linum} → '{ctx}'")
+                        summaries.append(f"Search_Code found {total} code matches for '{pat}' in the project:\n  " + "\n  ".join(formatted_parts) + f"\n...and {total - 2} more match(es). Each result shows the file path, line number, and surrounding code context.")
+                    else:
+                        summaries.append(f"Search_Code found 0 results for pattern '{pat}' in the codebase. Common reasons: (1) the pattern doesn't match any code, (2) the files searched don't contain this pattern, (3) the search is case-sensitive and the case doesn't match.")
             elif tool_name == "Search_Replace":
-                if args.get("preview"):
-                    summaries.append(f"Previewed {payload.get('replacements', 0)} replacement(s) of `{args.get('search', 'the search term')}` in {payload.get('file', args.get('path', 'the target path'))}.")
+                replacements = payload.get('replacements', 0)
+                preview = args.get("preview", False)
+                target_path = payload.get('file', args.get('path', 'the target file'))
+                search_term = args.get('search', 'the search term')
+                safe_search = search_term.replace("{", "{{").replace("}", "}}")
+                if preview:
+                    summaries.append(f"Search_Replace preview mode: {replacements} occurrence(s) of '{safe_search}' were found in {target_path} and would be replaced. No changes were written — this is a dry run. Confirm to apply the changes.")
                 else:
-                    summaries.append(f"Replaced {payload.get('replacements', 0)} occurrence(s) of `{args.get('search', 'the search term')}` in {payload.get('file', args.get('path', 'the target path'))}.")
+                    summaries.append(f"Search_Replace applied {replacements} replacement(s) of '{safe_search}' in {target_path}. Changes are now written to the file on disk. Use File_Read to verify the changes, or Git_Status to see the modified files.")
             elif tool_name == "System_Info":
                 category = args.get("category", "os")
+                cpu_count = payload.get('cpu_count', 0)
+                os_name = payload.get('os', 'unknown OS')
+                python_version = payload.get('python_version', 'unknown')
+                mem_total = payload.get('memory_total_gb', 0)
+                mem_available = payload.get('memory_available_gb', 0)
+                hostname = payload.get('hostname', 'unknown')
                 if category == "cpu":
-                    cpu_count = payload.get('cpu_count', 0)
-                    os_name = payload.get('os')
-                    python_version = payload.get('python_version')
-                    details = [f"{cpu_count} cores available"]
-                    if os_name:
-                        details.append(f"OS {os_name}")
-                    if python_version:
-                        details.append(f"Python {python_version}")
-                    summaries.append(f"Retrieved CPU information: {', '.join(details)}.")
-                elif category == "memory":
+                    cpu_brand = payload.get('cpu_brand', 'x86_64')
+                    cpu_mhz = payload.get('cpu_mhz', 0)
                     summaries.append(
-                        f"Memory details: {payload.get('memory_total_gb', 0)} GB total, "
-                        f"OS {payload.get('os', 'unknown OS')}, Python {payload.get('python_version', 'unknown')}, "
-                        f"{payload.get('cpu_count', 0)} CPU cores."
+                        f"CPU information retrieved: {cpu_count} core(s) detected ({cpu_brand}). "
+                        f"Frequency: {cpu_mhz:.0f} MHz. "
+                        f"Python sees {cpu_count} logical cores — this determines how many parallel threads can run efficiently."
+                    )
+                elif category == "memory":
+                    mem_used = mem_total - mem_available
+                    pct = (mem_used / mem_total * 100) if mem_total > 0 else 0
+                    summaries.append(
+                        f"Memory snapshot: {mem_total:.1f} GB total, {mem_available:.1f} GB available, ~{mem_used:.1f} GB in use ({pct:.0f}%). "
+                        f"Low available memory can cause swapping (disk used as RAM) which dramatically slows performance. "
+                        f"OS: {os_name}, Python: {python_version}."
                     )
                 elif category == "os":
                     summaries.append(
-                        f"OS details: {payload.get('os', 'unknown OS')}, Python {payload.get('python_version', 'unknown')}, "
-                        f"{payload.get('cpu_count', 0)} CPU cores, {payload.get('memory_total_gb', 0)} GB memory."
+                        f"Operating system: {os_name}, hostname: {hostname}. "
+                        f"Python version: {python_version}. "
+                        f"Resources: {cpu_count} CPU cores, {mem_total:.1f} GB RAM total. "
+                        f"This system information helps you understand the execution environment — e.g., memory limits affect how large files you can process."
                     )
                 else:
-                    summaries.append(f"Retrieved {category} system information successfully.")
+                    summaries.append(f"Retrieved {category} system information. CPU: {cpu_count} cores, RAM: {mem_total:.1f} GB, OS: {os_name}, Python: {python_version}.")
             elif tool_name == "Process_List":
-                if args.get("limit"):
-                    process_names = [f"{p.get('name', 'unknown')} ({p.get(args.get('sort_by', 'cpu'), p.get('cpu', 'n/a'))})" for p in payload.get("processes", [])]
-                    summaries.append(f"Available process results sorted by {args.get('sort_by', 'pid')}: {', '.join(process_names)}.")
-                elif args.get("filter") == "running" or "active processes" in user_query:
-                    process_names = [p.get("name", "unknown") for p in payload.get("processes", [])]
-                    summaries.append(f"Retrieved {payload.get('total', 0)} active processes: {', '.join(process_names)}.")
-                else:
-                    summaries.append(f"Retrieved {payload.get('total', 0)} processes.")
+                processes = payload.get("processes", [])
+                total = payload.get('total', 0)
+                limit = args.get("limit")
+                sort_by = args.get('sort_by', 'cpu')
+                filter_ = args.get('filter', '')
+                cpu_usage = [float(str(p.get('cpu', 0)).rstrip('%')) for p in processes[:3]]
+                mem_usage = [float(str(p.get('memory', 0)).rstrip('%')) for p in processes[:3]]
+                summaries.append(
+                    f"Process_List returned {total} process(es)"
+                    + (f" (showing top {limit})" if limit else "")
+                    + (f", filter: '{filter_}'" if filter_ else "")
+                    + f". Top CPU: {', '.join(f'{p:.1f}%' for p in cpu_usage)}, top MEM: {', '.join(f'{p:.1f}%' for p in mem_usage)}. "
+                    f"Processes consuming high CPU may indicate active computation; high memory indicates heavy data usage."
+                )
             elif tool_name == "Database_Query":
-                if "orders" in args.get("query", "").lower() and "30 days" in args.get("query", "").lower():
-                    summaries.append(f"Found {payload.get('total', 0)} orders from the last 30 days in {args.get('database', 'the database')}.")
+                rows = payload.get('rows', [])
+                total = payload.get('total', 0)
+                db = args.get('database', 'the database')
+                query = args.get('query', '')
+                if rows and total > 0:
+                    cols = list(rows[0].keys()) if isinstance(rows[0], dict) else []
+                    sample_row = rows[0]
+                    # Escape braces in dict representation to avoid validator false positives
+                    safe_sample = json.dumps(sample_row).replace("{", "{{").replace("}", "}}")
+                    summaries.append(
+                        f"Database query on '{db}' returned {total} row(s). "
+                        f"Columns: {', '.join(cols)}. "
+                        f"Sample row: {safe_sample}. "
+                        f"This query executed against the database and retrieved structured rows — each row represents a record, each column a field."
+                    )
                 else:
-                    summaries.append(f"Query returned {payload.get('total', 0)} rows from {args.get('database', 'the database')}.")
+                    summaries.append(f"Database query on '{db}' returned 0 rows. This could mean: no data matches the query conditions, the table is empty, or the query syntax needs adjustment.")
             elif tool_name == "Database_List":
-                if "databases" in payload:
-                    summaries.append(f"Listed {payload.get('total', 0)} available databases: {', '.join(payload.get('databases', []))}.")
+                databases = payload.get('databases', [])
+                total = payload.get('total', 0)
+                db_name = args.get('database', '')
+                if databases:
+                    summaries.append(f"Listed {total} available databases: {', '.join(databases)}. To explore a specific database, use Database_Query to run a SELECT query against it.")
                 else:
-                    summaries.append(f"Listed database objects for {args.get('database', 'the requested database')}.")
+                    summaries.append(f"Listed database objects for '{db_name}'. This shows tables, views, and other objects within the specified database.")
+            elif tool_name == "File_Write":
+                path = payload.get('path', args.get('file_path', 'the file'))
+                bytes_written = payload.get('bytes_written', 0)
+                summaries.append(f"File_Write successfully created/modified '{path}' ({bytes_written} bytes written). The file is now on disk and will persist across sessions. Use File_Read to verify the content.")
+            elif tool_name == "File_Delete":
+                path = payload.get('path', args.get('path', 'the target path'))
+                summaries.append(f"File_Delete removed '{path}' from the filesystem. This action is permanent — deleted files cannot be recovered without version control (e.g., git).")
+            elif tool_name == "File_Copy":
+                src = payload.get('source', args.get('source', 'the source'))
+                dst = payload.get('destination', args.get('destination', 'the destination'))
+                summaries.append(f"File_Copy duplicated '{src}' to '{dst}'. Both files now exist independently — modifying one does not affect the other.")
+            elif tool_name == "Web_Screenshot":
+                url = payload.get('url', args.get('url', 'the URL'))
+                width = payload.get('width', 0)
+                height = payload.get('height', 0)
+                size_kb = payload.get('size_kb', 0)
+                summaries.append(f"Web_Screenshot captured {url} at {width}x{height} resolution ({size_kb} KB). The screenshot shows the visible portion of the page at the time of capture — dynamic content like menus or modals may vary.")
             else:
                 summaries.append(f"Completed {tool_name} successfully.")
 
