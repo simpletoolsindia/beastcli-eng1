@@ -21,6 +21,7 @@ output/ollama_loop_*.jsonl
 output/review_fix_*.jsonl
 output/review_round*.jsonl
 output/generated_from_ui.jsonl
+!output/datasets_for_review/*.jsonl
 data/uploads/
 _unsloth/
 unsloth_output/
