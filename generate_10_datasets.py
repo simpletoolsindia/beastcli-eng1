@@ -5,198 +5,169 @@ Each dataset has different configurations for diversity.
 """
 import json
 import random
+import uuid
 import sys
 from pathlib import Path
 from datetime import datetime, timezone
 
 sys.path.insert(0, str(Path(__file__).parent))
-from generate_100k import HQDatasetGenerator, HQDatasetGenerator
+from generate_100k import HQDatasetGenerator, LOCALES as ALL_LOCALES, EXPANDED_INTENTS, DIFFICULTIES
 from merged_dataset_generator import (
-    Localization, LocalizationContent, Language, Tone, FormalityLevel,
-    ComprehensiveDatasetPipeline, ToolRegistry, ToolSchema, DatasetValidator,
-    DatasetExample, Message, DifficultyLevel, SystemPromptGenerator,
-    ResponseGenerator, ToolCallGenerator
+    Localization, LocalizationContent, DifficultyLevel,
+    ToolRegistry, ToolSchema, DatasetValidator,
+    DatasetExample, Message,
+    SystemPromptGenerator, ResponseGenerator, FinalAnswerGenerator,
 )
 
-# All available locales in HQDatasetGenerator.LOCALES
-ALL_LOCALES = HQDatasetGenerator.LOCALES
 
-# Dataset configurations
+class FilteredGenerator:
+    """HQDatasetGenerator subclass with filtered locale choices."""
+
+    def __init__(self, config: dict):
+        self._cfg = config
+        self.tools = ToolRegistry.get_all_tools()
+        self.validator = DatasetValidator()
+        self._used_intents: dict[str, set[str]] = {}
+        self._example_count = 0
+
+        langs = config["languages"]
+        tones = config["tones"]
+        forms = config["formality"]
+
+        self._filtered_locales = [
+            (lang, tone, form)
+            for (lang, tone, form) in ALL_LOCALES
+            if lang in langs and tone in tones and form in forms
+        ]
+        if not self._filtered_locales:
+            self._filtered_locales = [l for l in ALL_LOCALES if l[0] in langs]
+        if not self._filtered_locales:
+            self._filtered_locales = ALL_LOCALES
+
+        print(f"  Filtered locales: {len(self._filtered_locales)} combinations")
+
+    def _pick_tool(self) -> ToolSchema:
+        weights = [1.2, 1.5, 1.0, 1.2, 1.0, 1.0, 0.4, 0.4, 0.8, 0.6]
+        return random.choices(self.tools, weights=weights, k=1)[0]
+
+    def _pick_difficulty(self) -> DifficultyLevel:
+        r = random.random()
+        cum = 0.0
+        for diff, prob in DIFFICULTIES:
+            cum += prob
+            if r < cum:
+                return diff
+        return DifficultyLevel.MEDIUM
+
+    def _pick_locale(self) -> tuple:
+        return random.choice(self._filtered_locales)
+
+    def _get_diverse_intent(self, tool_name: str) -> tuple[str, dict]:
+        intents = EXPANDED_INTENTS.get(tool_name, [])
+        if not intents:
+            return (f"use {tool_name}", {})
+        used = self._used_intents.get(tool_name, set())
+        unused = [i for i in intents if i["q"] not in used]
+        if unused and random.random() < 0.8:
+            intent = random.choice(unused)
+            used.add(intent["q"])
+            self._used_intents[tool_name] = used
+        else:
+            intent = random.choice(intents)
+        return intent["q"], intent["a"]
+
+    def generate_one(self, include_error: bool = False) -> DatasetExample:
+        tool = self._pick_tool()
+        difficulty = self._pick_difficulty()
+        lang, tone, formality = self._pick_locale()
+
+        loc = Localization(
+            language=lang, tone=tone, formality=formality,
+            humanize=True, humanize_level="medium",
+        )
+
+        query_hint, intent_args = self._get_diverse_intent(tool.name)
+
+        system_prompt = SystemPromptGenerator.generate(loc)
+        messages = [
+            Message(role="system", content=system_prompt),
+            Message(role="user", content=query_hint),
+        ]
+
+        success = not include_error or random.random() > 0.15
+
+        tc_id = "call_%s" % uuid.uuid4().hex[:12]
+        tool_call_content = json.dumps({
+            "type": "tool_call",
+            "id": tc_id,
+            "tool_name": tool.name,
+            "arguments": intent_args,
+        }, ensure_ascii=False)
+
+        tool_response = ResponseGenerator.generate(tool, intent_args, success)
+        tool_result_content = tool_response.replace("{{TOOL_CALL_ID}}", tc_id)
+
+        messages.append(Message(role="assistant", content=tool_call_content))
+        messages.append(Message(role="tool", content=tool_result_content, tool_call_id=tc_id, name=tool.name))
+
+        final = FinalAnswerGenerator.generate(tool, intent_args, success, loc.language)
+        messages.append(Message(role="assistant", content=final))
+
+        self._example_count += 1
+        return DatasetExample(
+            messages=messages,
+            localization=loc,
+            tools=[t.to_openai_format() for t in self.tools],
+            metadata={
+                "difficulty": difficulty.value,
+                "tool_category": tool.category,
+                "tool_name": tool.name,
+                "tools_used": [tool.name],
+                "num_tools": 1,
+                "success": success,
+                "generated_at": datetime.now(timezone.utc).isoformat(),
+                "generator_version": "v5-simplified",
+            }
+        )
+
+    def generate_batch(self, count: int, include_error: bool = False) -> list[DatasetExample]:
+        examples = []
+        attempts = 0
+        max_attempts = count * 10
+        while len(examples) < count and attempts < max_attempts:
+            attempts += 1
+            ex = self.generate_one(include_error=include_error)
+            ok, _ = self.validator.validate_example(ex)
+            if ok:
+                examples.append(ex)
+        return examples
+
+
 DATASET_CONFIGS = [
-    {
-        "name": "ds1_english_pro",
-        "seed": 1001,
-        "count": 1000,
-        "languages": ["en"],
-        "tones": ["professional"],
-        "formality": ["formal", "neutral"],
-        "description": "English only, professional tone, formal contexts"
-    },
-    {
-        "name": "ds2_multilang_casual",
-        "seed": 1002,
-        "count": 1000,
-        "languages": ["en", "hi", "es", "fr", "de"],
-        "tones": ["casual"],
-        "formality": ["neutral", "informal"],
-        "description": "Multi-language casual tone dataset"
-    },
-    {
-        "name": "ds3_asian_langs",
-        "seed": 1003,
-        "count": 1000,
-        "languages": ["ja", "ko", "zh"],
-        "tones": ["professional", "friendly"],
-        "formality": ["formal", "neutral"],
-        "description": "Asian languages dataset"
-    },
-    {
-        "name": "ds4_tech_friendly",
-        "seed": 1004,
-        "count": 1000,
-        "languages": ["en"],
-        "tones": ["technical", "friendly"],
-        "formality": ["neutral"],
-        "description": "English technical friendly tone"
-    },
-    {
-        "name": "ds5_eu_languages",
-        "seed": 1005,
-        "count": 1000,
-        "languages": ["fr", "de", "it", "es", "pt"],
-        "tones": ["professional", "casual"],
-        "formality": ["formal", "neutral", "informal"],
-        "description": "European languages dataset"
-    },
-    {
-        "name": "ds6_hindi_hinglish",
-        "seed": 1006,
-        "count": 1000,
-        "languages": ["hi"],
-        "tones": ["casual", "friendly"],
-        "formality": ["informal", "neutral"],
-        "description": "Hindi/Hinglish mixed dataset"
-    },
-    {
-        "name": "ds7_easy_simple",
-        "seed": 1007,
-        "count": 1000,
-        "languages": ["en", "es", "fr"],
-        "tones": ["friendly", "casual"],
-        "formality": ["neutral"],
-        "description": "Easy difficulty, simple tasks"
-    },
-    {
-        "name": "ds8_hard_expert",
-        "seed": 1008,
-        "count": 1000,
-        "languages": ["en"],
-        "tones": ["technical", "professional"],
-        "formality": ["formal"],
-        "description": "Hard/Expert difficulty, complex tasks"
-    },
-    {
-        "name": "ds9_all_langs",
-        "seed": 1009,
-        "count": 1000,
-        "languages": ["en", "hi", "es", "fr", "de", "ja", "zh", "ko", "ru", "ar", "pt", "it"],
-        "tones": ["professional", "casual", "technical", "friendly"],
-        "formality": ["formal", "neutral", "informal"],
-        "description": "All 12 languages, all tones"
-    },
-    {
-        "name": "ds10_balanced",
-        "seed": 2010,
-        "count": 1000,
-        "languages": ["en", "hi", "es", "fr", "de", "ja", "zh"],
-        "tones": ["professional", "casual"],
-        "formality": ["formal", "neutral", "informal"],
-        "description": "Balanced mix of popular languages"
-    },
+    {"name": "ds1_english_pro",      "seed": 1001, "count": 1000, "languages": ["en"],                      "tones": ["professional"],                "formality": ["formal", "neutral"],       "description": "English only, professional tone"},
+    {"name": "ds2_multilang_casual",   "seed": 1002, "count": 1000, "languages": ["en", "hi", "es", "fr", "de"], "tones": ["casual"],                       "formality": ["neutral", "informal"],    "description": "Multi-language casual tone"},
+    {"name": "ds3_asian_langs",         "seed": 1003, "count": 1000, "languages": ["ja", "ko", "zh"],              "tones": ["professional", "friendly"],    "formality": ["formal", "neutral"],      "description": "Asian languages"},
+    {"name": "ds4_tech_friendly",       "seed": 1004, "count": 1000, "languages": ["en"],                      "tones": ["technical", "friendly"],       "formality": ["neutral"],                "description": "English technical friendly"},
+    {"name": "ds5_eu_languages",        "seed": 1005, "count": 1000, "languages": ["fr", "de", "it", "es", "pt"], "tones": ["professional", "casual"],    "formality": ["formal", "neutral", "informal"], "description": "European languages"},
+    {"name": "ds6_hindi_hinglish",      "seed": 1006, "count": 1000, "languages": ["hi"],                      "tones": ["casual", "friendly"],          "formality": ["informal", "neutral"],    "description": "Hindi/Hinglish"},
+    {"name": "ds7_easy_simple",         "seed": 1007, "count": 1000, "languages": ["en", "es", "fr"],        "tones": ["friendly", "casual"],        "formality": ["neutral"],                "description": "Easy difficulty"},
+    {"name": "ds8_hard_expert",         "seed": 1008, "count": 1000, "languages": ["en"],                      "tones": ["technical", "professional"],   "formality": ["formal"],                 "description": "Hard/Expert difficulty"},
+    {"name": "ds9_all_langs",           "seed": 1009, "count": 1000, "languages": ["en", "hi", "es", "fr", "de", "ja", "zh", "ko", "ru", "ar", "pt", "it"], "tones": ["professional", "casual", "technical", "friendly"], "formality": ["formal", "neutral", "informal"], "description": "All 12 languages"},
+    {"name": "ds10_balanced",           "seed": 2010, "count": 1000, "languages": ["en", "hi", "es", "fr", "de", "ja", "zh"], "tones": ["professional", "casual"],   "formality": ["formal", "neutral", "informal"], "description": "Balanced mix"},
 ]
 
 
-def make_filtered_generator(config: dict) -> HQDatasetGenerator:
-    """Create a generator that respects locale filters from config."""
-    gen = HQDatasetGenerator.__new__(HQDatasetGenerator)
-    gen.tools = ToolRegistry.get_all_tools()
-    gen.validator = DatasetValidator()
-    gen._tool_weights = {}
-
-    for t in gen.tools:
-        cat = t.category
-        if cat == "git":
-            gen._tool_weights[t.name] = 0.5
-        elif t.name in ("Python_Run", "Git_Push"):
-            gen._tool_weights[t.name] = 0.7
-        elif t.name in ("File_Copy", "File_Delete", "Bash_Execute", "Web_Fetch"):
-            gen._tool_weights[t.name] = 1.8
-        elif t.name in ("File_Read", "File_Write", "File_List", "Web_Search"):
-            gen._tool_weights[t.name] = 1.2
-        else:
-            gen._tool_weights[t.name] = 1.0
-
-    gen._used_intents = {}
-    gen._example_count = 0
-
-    # Filter locales based on config
-    langs = config["languages"]
-    tones = config["tones"]
-    forms = config["formality"]
-
-    filtered = [
-        (lang, tone, form)
-        for (lang, tone, form) in ALL_LOCALES
-        if lang in langs and tone in tones and form in forms
-    ]
-
-    # Fallback: if no exact match, use any locale matching the languages
-    if not filtered:
-        filtered = [
-            (lang, tone, form)
-            for (lang, tone, form) in ALL_LOCALES
-            if lang in langs
-        ]
-
-    # If still empty, use all locales matching any criterion
-    if not filtered:
-        filtered = ALL_LOCALES
-
-    gen._filtered_locales = filtered
-    gen._diff_weights = [
-        (DifficultyLevel.EASY, 0.30),
-        (DifficultyLevel.MEDIUM, 0.40),
-        (DifficultyLevel.HARD, 0.20),
-        (DifficultyLevel.EXPERT, 0.10),
-    ]
-
-    # Copy methods from HQDatasetGenerator
-    gen._pick_tool = HQDatasetGenerator._pick_tool.__get__(gen, HQDatasetGenerator)
-    gen._pick_difficulty = HQDatasetGenerator._pick_difficulty.__get__(gen, HQDatasetGenerator)
-    gen._pick_locale = lambda: random.choice(gen._filtered_locales)
-    gen._get_diverse_intent = HQDatasetGenerator._get_diverse_intent.__get__(gen, HQDatasetGenerator)
-    gen._get_diverse_query = HQDatasetGenerator._get_diverse_query.__get__(gen, HQDatasetGenerator)
-    gen._build_args = HQDatasetGenerator._build_args.__get__(gen, HQDatasetGenerator)
-    gen.generate_one = HQDatasetGenerator.generate_one.__get__(gen, HQDatasetGenerator)
-    gen.generate_batch = HQDatasetGenerator.generate_batch.__get__(gen, HQDatasetGenerator)
-
-    print(f"  Filtered locales: {len(gen._filtered_locales)} combinations")
-    return gen
-
-
 def generate_dataset(config: dict, output_base: str) -> dict:
-    """Generate a single dataset with given config."""
     name = config["name"]
     print(f"\n{'='*60}")
     print(f"Generating: {name}")
     print(f"  Languages: {config['languages']}")
     print(f"  Tones: {config['tones']}")
     print(f"  Count: {config['count']}")
-    print(f"  Description: {config['description']}")
     print("=" * 60)
 
     random.seed(config["seed"])
-    gen = make_filtered_generator(config)
+    gen = FilteredGenerator(config)
 
     examples = gen.generate_batch(config["count"])
     print(f"Generated {len(examples)} valid examples")
@@ -218,16 +189,10 @@ def generate_dataset(config: dict, output_base: str) -> dict:
 
     print(f"  Languages: {dict(sorted(lang_counts.items(), key=lambda x: -x[1])[:5])}")
 
-    stats = {
-        "name": name,
-        "total": len(examples),
-        "output_path": str(output_path),
-        "languages": lang_counts,
-        "tools": tool_counts,
-        "difficulty": diff_counts,
+    return {
+        "name": name, "total": len(examples), "output_path": str(output_path),
+        "languages": lang_counts, "tools": tool_counts, "difficulty": diff_counts,
     }
-    print(f"Saved to: {output_path}")
-    return stats
 
 
 def main():
@@ -236,17 +201,15 @@ def main():
 
     all_stats = []
     for i, config in enumerate(DATASET_CONFIGS):
-        print(f"\n\n[{i+1}/10] Processing {config['name']}")
+        print(f"\n[{i+1}/10] {config['name']}")
         stats = generate_dataset(config, output_base)
         all_stats.append(stats)
 
-    # Summary report
     report_path = Path(output_base) / "REPORT.md"
     with open(report_path, "w") as f:
         f.write("# Dataset Generation Report\n\n")
         f.write(f"Generated: {datetime.now().isoformat()}\n\n")
         f.write(f"Total datasets: {len(all_stats)}\n\n")
-        f.write("## Dataset Summary\n\n")
         for stats in all_stats:
             f.write(f"### {stats['name']}\n")
             f.write(f"- Total: {stats['total']}\n")
@@ -265,12 +228,12 @@ def main():
                 f.write(f"  - {diff}: {cnt} ({pct:.1f}%)\n")
             f.write("\n")
 
-    print(f"\n\n{'='*60}")
+    print(f"\n{'='*60}")
     print("ALL 10 DATASETS GENERATED")
     print(f"Report: {report_path}")
     print("=" * 60)
-    for stats in all_stats:
-        print(f"  - {stats['output_path']}")
+    for s in all_stats:
+        print(f"  - {s['output_path']}")
 
 
 if __name__ == "__main__":
