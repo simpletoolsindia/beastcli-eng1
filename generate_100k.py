@@ -517,14 +517,116 @@ class HQDatasetGenerator:
         return intent["q"], intent["a"]
 
     def _get_diverse_query(self, tool_name: str, difficulty: DifficultyLevel, loc: Localization) -> str:
-        """Pick a diverse query for the tool/difficulty."""
+        """Pick a diverse query for the tool/difficulty. Never fallback to generic 'Execute ToolName'."""
         queries = EXPANDED_QUERIES.get(tool_name, {}).get(difficulty, [])
         if queries:
             q = random.choice(queries)
             if loc.humanize:
                 q = Humanizer.humanize(q, loc)
             return q
-        return f"Execute {tool_name}"
+
+        # No templates for this difficulty — generate a realistic fallback based on difficulty
+        # These fallbacks are actual natural-language queries, NOT "Execute ToolName"
+        fallback_queries = {
+            DifficultyLevel.MEDIUM: {
+                "Bash_ShellStatus": "Check my terminal environment and available system resources",
+                "Bash_Execute": "Run a quick system check with common shell commands",
+                "File_Read": "Read and display the contents of a configuration file",
+                "File_Write": "Write and persist a data file to the project directory",
+                "File_Search": "Search the codebase for files matching a naming pattern",
+                "File_List": "Explore the project directory structure",
+                "File_Delete": "Remove an old log file that's no longer needed",
+                "File_Copy": "Backup an important configuration file before modifying it",
+                "Git_Status": "Check the current state of the git repository",
+                "Git_Log": "View the recent commit history to understand recent changes",
+                "Git_Diff": "Compare the working directory against the last commit",
+                "Git_Branch": "List and switch between available git branches",
+                "Git_Pull": "Sync the local repository with the remote branch",
+                "Git_Push": "Upload local commits to the remote repository",
+                "Git_Commit": "Stage and commit a set of changes with a descriptive message",
+                "Web_Search": "Search the web for relevant technical documentation",
+                "Web_Fetch": "Retrieve and parse the content of a web page",
+                "Web_Screenshot": "Capture a screenshot of a web page for reference",
+                "Python_Run": "Execute a Python script to process some data",
+                "Python_Test": "Run the test suite to verify the build",
+                "Node_Run": "Execute a Node.js script to handle a task",
+                "Search_Code": "Search the codebase for specific code patterns",
+                "Search_Replace": "Find and replace text across multiple files",
+                "System_Info": "Gather information about the system environment",
+                "Process_List": "List running processes to monitor system activity",
+                "Database_Query": "Run a database query to retrieve records",
+                "Database_List": "List available database objects",
+            },
+            DifficultyLevel.HARD: {
+                "Bash_ShellStatus": "Diagnose the current shell environment for debugging a CI/CD pipeline issue",
+                "Bash_Execute": "Run a complex piped command to analyze logs and extract error patterns",
+                "File_Read": "Read a large source file and identify the key function definitions",
+                "File_Write": "Create a complete module with proper structure, imports, and error handling",
+                "File_Search": "Find all files of a specific type across nested directories in a large project",
+                "File_List": "Traverse and categorize all files in the project by extension and size",
+                "File_Delete": "Clean up build artifacts and temporary files matching a glob pattern",
+                "File_Copy": "Mirror a directory structure to create a backup with all subfolders",
+                "Git_Status": "Analyze git status output to determine what needs to be committed",
+                "Git_Log": "Trace the history of a specific file across multiple commits and branches",
+                "Git_Diff": "Compare two branches to identify all files that changed between them",
+                "Git_Branch": "Create a feature branch and switch to it, ensuring clean working tree",
+                "Git_Pull": "Rebase the local branch onto the latest remote changes to keep history linear",
+                "Git_Push": "Push with lease to safely update the remote only if no one else pushed",
+                "Git_Commit": "Craft a semantic commit with a proper subject, body, and signed-off line",
+                "Web_Search": "Research best practices for implementing a feature by comparing multiple sources",
+                "Web_Fetch": "Fetch and parse structured data from a REST API, handling pagination",
+                "Web_Screenshot": "Capture screenshots of multiple pages to document a bug report",
+                "Python_Run": "Run a Python script that processes a CSV file and generates a summary report",
+                "Python_Test": "Run a specific test file with verbose output and coverage report",
+                "Node_Run": "Execute a Node script that reads a JSON config and performs validation",
+                "Search_Code": "Find all instances of a deprecated function call across the entire codebase",
+                "Search_Replace": "Refactor a function name across all files in a directory using preview mode",
+                "System_Info": "Collect comprehensive system metrics including CPU, memory, disk, and uptime",
+                "Process_List": "Identify the top 10 processes consuming CPU and memory with sorting options",
+                "Database_Query": "Join multiple tables to generate an aggregated report of recent activity",
+                "Database_List": "List all tables in a schema and describe their structure",
+            },
+            DifficultyLevel.EXPERT: {
+                "Bash_ShellStatus": "Analyze the shell environment to diagnose a cross-platform build failure scenario",
+                "Bash_Execute": "Construct and execute a one-liner pipeline that filters, aggregates, and visualizes log data",
+                "File_Read": "Read and analyze a complex source file to document its architecture and dependencies",
+                "File_Write": "Write a fully functional CLI application with argument parsing, logging, and error handling",
+                "File_Search": "Find files matching multiple patterns recursively and generate a summary report",
+                "File_List": "Recursively list all files, group by type, and identify files that haven't been modified in 90 days",
+                "File_Delete": "Safely remove all build artifacts older than 30 days, excluding anything in .git",
+                "File_Copy": "Copy an entire source tree while preserving permissions, timestamps, and symlinks",
+                "Git_Status": "Full repository diagnosis: find untracked large files, list stashes, show worktree status",
+                "Git_Log": "Analyze commit graph to find commits that introduced a regression using git bisect",
+                "Git_Diff": "Compare two specific commits to extract the exact lines changed for a patch",
+                "Git_Branch": "Manage git worktree: create a temporary worktree for hotfix, switch branches cleanly",
+                "Git_Pull": "Handle a merge conflict during pull by stashing changes, pulling, and rebasing",
+                "Git_Push": "Force push a cleaned-up commit history to overwrite the remote branch safely",
+                "Git_Commit": "Amend and sign a commit with proper message formatting including a footer for issue reference",
+                "Web_Search": "Search for research papers and documentation on a specific technology, compare methodologies",
+                "Web_Fetch": "Fetch paginated API data, parse JSON responses, and save results to a structured file",
+                "Web_Screenshot": "Capture and save screenshots of all pages in a documentation site for offline access",
+                "Python_Run": "Write and execute a Python script that implements a sorting algorithm benchmark with timing",
+                "Python_Test": "Run pytest with coverage threshold enforcement, fail if coverage drops below 80%",
+                "Node_Run": "Execute Node code that makes an async HTTP request, parses JSON, and writes to a file",
+                "Search_Code": "Find all TODO and FIXME comments across the project, categorize by file and priority",
+                "Search_Replace": "Perform a multi-file refactor: rename a class across 50+ files with preview validation",
+                "System_Info": "Collect system information for a bug report: OS, Python version, CPU, RAM, disk space",
+                "Process_List": "Monitor running processes, filter by resource usage, identify potential memory leaks",
+                "Database_Query": "Execute a complex SQL query with joins, aggregations, and subqueries for analytics",
+                "Database_List": "List all databases, their schemas, and identify tables with missing indexes",
+            },
+        }
+
+        # Try harder difficulty levels if this one has no fallback
+        for fallback_difficulty in [DifficultyLevel.HARD, DifficultyLevel.MEDIUM, DifficultyLevel.EASY]:
+            query = fallback_queries.get(fallback_difficulty, {}).get(tool_name)
+            if query:
+                if loc.humanize:
+                    query = Humanizer.humanize(query, loc)
+                return query
+
+        # Absolute last resort — a real descriptive query, never "Execute ToolName"
+        return f"Run the {tool_name.replace('_', ' ').lower()} operation to complete the task"
 
     def _build_args(self, tool_name: str, query: str, intent_args: dict) -> dict:
         """Build args from intent + query inference."""

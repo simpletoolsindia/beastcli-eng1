@@ -1489,23 +1489,54 @@ class ResponseGenerator:
             return json.dumps(result)
         if tool.name == "File_List":
             directory = args.get("directory", ".")
-            if directory == "config" or directory.endswith("/config"):
+            # Map directories to appropriate file listings
+            dir_lower = directory.lower()
+            if "config" in dir_lower or "settings" in dir_lower:
                 entries = [
                     {"name": "config.json", "type": "file"},
                     {"name": "settings.yaml", "type": "file"},
+                    {"name": "secrets.env", "type": "file"},
+                    {"name": "database.conf", "type": "file"},
                 ]
-            elif directory == "src" or directory.endswith("/src"):
+            elif "src" in dir_lower or "source" in dir_lower or "lib" in dir_lower:
                 entries = [
                     {"name": "app.py", "type": "file"},
                     {"name": "main.py", "type": "file"},
+                    {"name": "utils.py", "type": "file"},
                     {"name": ".env.example", "type": "file"},
                 ]
+            elif "test" in dir_lower:
+                entries = [
+                    {"name": "test_main.py", "type": "file"},
+                    {"name": "test_auth.py", "type": "file"},
+                    {"name": "conftest.py", "type": "file"},
+                ]
+            elif "docs" in dir_lower or "documentation" in dir_lower:
+                entries = [
+                    {"name": "README.md", "type": "file"},
+                    {"name": "setup.md", "type": "file"},
+                    {"name": "architecture.md", "type": "file"},
+                ]
+            elif "build" in dir_lower or "dist" in dir_lower or "output" in dir_lower:
+                entries = [
+                    {"name": "main.js", "type": "file"},
+                    {"name": "bundle.js", "type": "file"},
+                ]
+            elif "logs" in dir_lower or "log" in dir_lower:
+                entries = [
+                    {"name": "app.log", "type": "file"},
+                    {"name": "error.log", "type": "file"},
+                ]
             else:
+                # Default root-ish listing
                 entries = [
                     {"name": "src", "type": "directory"},
                     {"name": "config", "type": "directory"},
+                    {"name": "tests", "type": "directory"},
+                    {"name": "docs", "type": "directory"},
                     {"name": "README.md", "type": "file"},
                     {"name": "main.py", "type": "file"},
+                    {"name": ".gitignore", "type": "file"},
                 ]
             result = {
                 "type": "tool_result",
@@ -1518,25 +1549,68 @@ class ResponseGenerator:
             # Escape braces so {command} doesn't appear as placeholder in final_answer
             safe_cmd = command.replace("{", "{{").replace("}", "}}")
             stdout = f"Executed: {safe_cmd}\n"
+            stderr = ""
+            exit_code = 0
             if command == "pwd":
                 stdout = "/Users/sridhar/project\n"
-            elif "ps aux --sort=-rss | head -5" in command:
+            elif "ps aux --sort=-rss | head" in command:
                 stdout = (
-                    "USER PID %CPU %MEM COMMAND\n"
-                    "sridhar 4101 3.2 12.8 node\n"
-                    "sridhar 3880 1.4 9.1 python3\n"
-                    "sridhar 2450 0.8 5.7 chrome\n"
-                    "sridhar 1780 0.3 4.2 code\n"
+                    "USER       PID %CPU %MEM COMMAND\n"
+                    "sridhar  4101  3.2 12.8 node\n"
+                    "sridhar  3880  1.4  9.1 python3\n"
+                    "sridhar  2450  0.8  5.7 chrome\n"
+                    "sridhar  1780  0.3  4.2 code\n"
                 )
-            elif "git status --porcelain" in command:
-                stdout = " M src/main.py\n?? new.py\n"
+            elif "git status" in command or "git status --porcelain" in command:
+                stdout = " M src/main.py\n M src/utils.py\n?? new_file.py\n"
+            elif "ls -la" in command and "config" in command:
+                stdout = (
+                    "total 24\n"
+                    "drwxr-xr-x 2 sridhar staff  128 Apr 21 10:00 config/\n"
+                    "-rw-r--r-- 1 sridhar staff  512 Apr 21 09:45 config.json\n"
+                    "-rw-r--r-- 1 sridhar staff  768 Apr 21 09:50 settings.yaml\n"
+                )
+            elif "ls -la" in command and "src" in command:
+                stdout = (
+                    "total 48\n"
+                    "-rw-r--r-- 1 sridhar staff  1024 Apr 21 09:30 app.py\n"
+                    "-rw-r--r-- 1 sridhar staff  2048 Apr 21 09:35 main.py\n"
+                    "-rw-r--r-- 1 sridhar staff   256 Apr 21 09:40 .env.example\n"
+                    "-rw-r--r-- 1 sridhar staff   128 Apr 21 09:42 utils.py\n"
+                )
+            elif "ls" in command:
+                stdout = "README.md\tapp\tconfig\tlib\n"
+            elif "find" in command and "src" in command:
+                stdout = "./src/main.py\n./src/utils.py\n./src/app.py\n"
+            elif "find" in command and "tests" in command:
+                stdout = "./tests/test_main.py\n./tests/test_auth.py\n"
+            elif "git log" in command and "oneline" in command:
+                stdout = "a1b2c3d feat: add user authentication module\nb2c3d4e fix: resolve memory leak in worker\nc3d4e5f refactor: improve error handling\n"
+            elif "git diff" in command:
+                stdout = "diff --git a/src/main.py b/src/main.py\n--- a/src/main.py\n+++ b/src/main.py\n@@ -5,7 +5,7 @@\n-import os\n+import sys\n@@ -12,3 +12,4 @@\n def main():\n     print('hello')\n+    sys.exit(0)\n"
+            elif "whoami" in command:
+                stdout = "sridhar\n"
+            elif "date" in command:
+                stdout = "Tue Apr 21 10:00:00 IST 2026\n"
+            elif "hostname" in command:
+                stdout = "sridhar-mbp.local\n"
+            elif "uname -a" in command:
+                stdout = "Darwin sridhar-mbp 23.0.0 Darwin Kernel Version 23.0.0 arm64\n"
+            elif "df -h" in command or "du -sh" in command:
+                stdout = "Filesystem      Size  Used Avail Use% Mounted on\n/dev/disk1s5  466Gi  324Gi  142Gi  70% /\n"
+            elif "free -m" in command:
+                stdout = "              total        used        free\nMem:          32768       16384       16384\nSwap:          8192         512        7680\n"
+            elif "curl " in command or "wget " in command:
+                stdout = '<!doctype html><html><head><title>Response</title></head><body>OK</body></html>\n'
+            elif "npm install" in command or "pip install" in command:
+                stdout = "Successfully installed dependencies\n"
             result = {
                 "type": "tool_result",
                 "tool_call_id": "{{TOOL_CALL_ID}}",
                 "output": json.dumps({
                     "stdout": stdout,
-                    "stderr": "",
-                    "exit_code": 0,
+                    "stderr": stderr,
+                    "exit_code": exit_code,
                 }),
             }
             return json.dumps(result)
